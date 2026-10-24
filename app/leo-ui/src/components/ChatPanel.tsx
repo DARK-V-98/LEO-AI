@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Mic, Send, ShieldCheck, Check, X, Sparkles } from "lucide-react";
+import { Mic, Send, ShieldCheck, Check, X } from "lucide-react";
 import AiOrb from "./AiOrb";
 
 type Message = {
@@ -40,14 +40,52 @@ export default function ChatPanel() {
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
   const [input, setInput] = useState("");
   const [listening, setListening] = useState(false);
+  const [thinking, setThinking] = useState(false);
 
-  function send() {
-    if (!input.trim()) return;
-    setMessages((m) => [
-      ...m,
-      { id: crypto.randomUUID(), from: "user", text: input.trim() },
-    ]);
+  async function send() {
+    const text = input.trim();
+    if (!text || thinking) return;
+
+    const nextMessages = [
+      ...messages,
+      { id: crypto.randomUUID(), from: "user" as const, text },
+    ];
+    setMessages(nextMessages);
     setInput("");
+    setThinking(true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          history: nextMessages.map((m) => ({
+            role: m.from === "user" ? "user" : "assistant",
+            content: m.text,
+          })),
+        }),
+      });
+      const data = await res.json();
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          from: "leo",
+          text: data.reply ?? "Sorry, I didn't catch that — try again?",
+        },
+      ]);
+    } catch {
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          from: "leo",
+          text: "I couldn't reach my systems just now — try again shortly.",
+        },
+      ]);
+    } finally {
+      setThinking(false);
+    }
   }
 
   function resolveConfirm(id: string, approved: boolean) {
@@ -81,8 +119,11 @@ export default function ChatPanel() {
           </div>
         </div>
         <span className="flex items-center gap-1 rounded-full border border-panel-border px-2 py-1 text-[10px] text-muted">
-          <Sparkles size={11} className="text-accent-violet" />
-          Gemini
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75 animate-ping" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-green" />
+          </span>
+          LEO Engine
         </span>
       </div>
 
@@ -134,6 +175,20 @@ export default function ChatPanel() {
             </div>
           </div>
         ))}
+
+        {thinking ? (
+          <div className="fade-up flex justify-start">
+            <div className="flex items-center gap-1 rounded-2xl border border-panel-border bg-white/[0.03] px-4 py-3">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="eq-bar h-2 w-2 rounded-full bg-accent-cyan"
+                  style={{ animationDelay: `${i * 0.15}s` }}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="border-t border-panel-border p-3">
@@ -174,7 +229,8 @@ export default function ChatPanel() {
 
           <button
             onClick={send}
-            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-accent-cyan transition-colors hover:bg-accent-cyan/10"
+            disabled={thinking}
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-accent-cyan transition-colors hover:bg-accent-cyan/10 disabled:opacity-40"
           >
             <Send size={15} />
           </button>

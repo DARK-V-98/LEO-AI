@@ -28,7 +28,7 @@ export default function Topbar() {
             </span>
           </div>
           <p className="font-mono text-[11px] text-muted">
-            SYS::ONLINE &nbsp;|&nbsp; MODEL_ROUTER::GEMINI+OPENROUTER &nbsp;|&nbsp;{" "}
+            SYS::ONLINE &nbsp;|&nbsp; NEURALINK_ENGINE::ACTIVE &nbsp;|&nbsp;{" "}
             {time}
           </p>
         </div>
