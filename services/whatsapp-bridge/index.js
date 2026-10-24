@@ -55,6 +55,13 @@ const MENTION_PATTERN = /\bleo\b/i;
 
 let sock = null;
 let starting = false;
+// idle | connecting | open — guards against ever having two live sockets
+// authenticated with the same session at once, which WhatsApp treats as a
+// conflict and kicks both off repeatedly (error 440, "connectionReplaced"
+// in a tight loop). That happens if startSock() gets called twice before
+// the first connection finishes — e.g. the auto-reconnect-on-boot path and
+// a leftover unprocessed "link" command both firing at startup.
+let socketState = "idle";
 
 // Short-lived, in-memory per-chat conversation context (lost on restart —
 // good enough for "what did I just ask", not meant as permanent history).
@@ -141,8 +148,13 @@ async function setStatus(partial) {
 }
 
 async function startSock() {
+  if (socketState === "connecting" || socketState === "open") {
+    console.log(`startSock() called while already ${socketState} — ignoring duplicate call.`);
+    return;
+  }
   if (starting) return;
   starting = true;
+  socketState = "connecting";
 
   try {
     const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
@@ -167,6 +179,7 @@ async function startSock() {
       }
 
       if (connection === "open") {
+        socketState = "open";
         const phoneNumber = sock?.user?.id?.split(":")[0] ?? null;
         await setStatus({
           status: "connected",
@@ -179,6 +192,7 @@ async function startSock() {
       }
 
       if (connection === "close") {
+        socketState = "idle";
         const statusCode =
           lastDisconnect?.error instanceof Boom
             ? lastDisconnect.error.output?.statusCode
@@ -192,13 +206,17 @@ async function startSock() {
           await setStatus({ status: "connecting" });
           console.log("Connection closed, reconnecting…", statusCode);
           starting = false;
-          startSock();
+          // Brief delay rather than an immediate retry — avoids hammering
+          // WhatsApp's servers if something is still genuinely conflicting
+          // (e.g. the session got linked again elsewhere).
+          setTimeout(() => startSock(), 2000);
           return;
         }
       }
     });
   } catch (err) {
     console.error("Failed to start WhatsApp socket:", err);
+    socketState = "idle";
     await setStatus({ status: "error", error: String(err?.message || err) });
   } finally {
     starting = false;
@@ -213,6 +231,7 @@ async function unlink() {
   } finally {
     fs.rmSync(AUTH_DIR, { recursive: true, force: true });
     sock = null;
+    socketState = "idle";
     await setStatus({
       status: "disconnected",
       qr: FieldValue.delete(),
