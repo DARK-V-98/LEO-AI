@@ -39,6 +39,13 @@ const OUTBOX = db.collection("whatsappOutbox");
 const SCHEDULED = db.collection("scheduledMessages");
 const KNOWLEDGE = db.collection("companyKnowledge");
 const PEOPLE = db.collection("people");
+const LEADS = db.collection("leads");
+const TASKS = db.collection("tasks");
+
+// Optional: a WhatsApp JID (a number like "94771234567@s.whatsapp.net") to
+// send a once-a-day summary of new leads/tasks to. Unset by default — the
+// digest is simply skipped until someone opts in by setting this.
+const DAILY_DIGEST_JID = process.env.DAILY_DIGEST_JID || null;
 
 const AUTH_DIR = process.env.AUTH_DIR || "./auth_info";
 const logger = pino({ level: process.env.LOG_LEVEL || "warn" });
@@ -192,6 +199,25 @@ async function rememberFact(fact, addedBy, source) {
   await KNOWLEDGE.add({ fact, addedBy, source, createdAt: Date.now() });
 }
 
+// Makes the memory system feel safe to rely on instead of a black box —
+// someone can check what's stored about them, and have it removed.
+const WHAT_REMEMBER_PATTERN =
+  /^\s*what do you (?:remember|know) about me\b|\bwhat have i told you\b/i;
+const FORGET_ME_PATTERN = /^\s*forget (?:about )?me\b|\bforget (?:what you know|everything) about me\b/i;
+
+async function describeWhatIsRemembered(jid) {
+  const personDoc = await PEOPLE.doc(jid).get();
+  if (!personDoc.exists) {
+    return "I don't have anything saved about you yet — introduce yourself (\"I'm <name>, <role>\") and I will.";
+  }
+  const p = personDoc.data();
+  return `I have you saved as ${p.name}${p.role ? `, ${p.role}` : ""}. That's only ever shown back to you, never mentioned to anyone else's chat. Say "forget about me" to clear it.`;
+}
+
+async function forgetPerson(jid) {
+  await PEOPLE.doc(jid).delete();
+}
+
 // Self-introduction — "I'm Vishwa, the software engineer", "my name is
 // Lahiruka", etc. Stored per-JID, only ever shown back to that same person.
 const INTRO_PATTERN = /\b(?:i'?m|i am|my name is|this is)\s+([A-Z][a-zA-Z]{1,30})\b[,:]?\s*(.*)/i;
@@ -219,14 +245,76 @@ const HELP_PATTERN =
 const HELP_TEXT = [
   "Here's what I can do here on WhatsApp:",
   "",
-  "• Just talk to me normally — ask questions, request a task, etc.",
+  "• Just talk to me normally — ask questions, request a task, etc. Mention a new lead or something to track and I'll log it automatically.",
   '• "poster: <description>" or "flyer of <description>" — I’ll generate an image (attach or reply to a photo to use it as a style reference).',
   '• "remind me in 20 minutes to <note>" or "remind me tomorrow at 9am to <note>" — I’ll DM you back at that time.',
   '• "tell group <name>: <message>" — sends to that group now, or schedules it if you include a time.',
+  '• "poll: <question>? <option>, <option>, ..." — sends a poll to this chat.',
   '• "remember that <fact>" — teaches me something to keep in mind going forward.',
+  '• "what do you remember about me" / "forget about me" — check or clear what I know about you.',
+  "• Send a voice note, photo, or document (PDF) and I'll read/listen and respond — works as a reply to earlier media too.",
   "",
   "In the company group, say “Leo” so I know you're talking to me.",
 ].join("\n");
+
+// Executes whatever structured actions Gemini's tool-calling decided to
+// take (log_lead, create_task) — writing to the same Firestore collections
+// the dashboard's Overview/To-Do/Leads tabs already read, via companyData.ts's
+// ListItem shape ({title, subtitle, meta?, accent?, createdAt}), so these
+// show up there immediately, not just as a WhatsApp confirmation message.
+async function executeActions(actions, byJid) {
+  for (const action of actions || []) {
+    try {
+      if (action.type === "log_lead") {
+        await LEADS.add({
+          title: action.name,
+          subtitle: [action.course, action.contact].filter(Boolean).join(" · ") || "New lead from WhatsApp",
+          meta: "WhatsApp",
+          accent: "violet",
+          contact: action.contact || null,
+          course: action.course || null,
+          notes: action.notes || null,
+          source: "whatsapp",
+          loggedBy: byJid,
+          createdAt: Date.now(),
+        });
+        await db
+          .collection("activity")
+          .add({
+            title: "Logged a lead from WhatsApp",
+            detail: action.name,
+            type: "ok",
+            createdAt: Date.now(),
+          })
+          .catch(() => {});
+      } else if (action.type === "create_task") {
+        await TASKS.add({
+          title: action.title,
+          subtitle: [action.assignee, action.dueDate].filter(Boolean).join(" · ") || "From WhatsApp",
+          meta: "WhatsApp",
+          accent: "cyan",
+          assignee: action.assignee || null,
+          dueDateRaw: action.dueDate || null,
+          notes: action.notes || null,
+          source: "whatsapp",
+          createdBy: byJid,
+          createdAt: Date.now(),
+        });
+        await db
+          .collection("activity")
+          .add({
+            title: "Created a task from WhatsApp",
+            detail: action.title,
+            type: "ok",
+            createdAt: Date.now(),
+          })
+          .catch(() => {});
+      }
+    } catch (err) {
+      console.error(`Failed to execute action ${action?.type}:`, err);
+    }
+  }
+}
 
 async function askLeo(jid, attachment) {
   if (!WEB_BASE_URL) {
@@ -246,6 +334,9 @@ async function askLeo(jid, attachment) {
     const data = await res.json();
     const reply = data?.reply || "Sorry, I didn't catch that — could you say it again?";
     remember(jid, "assistant", reply);
+    if (Array.isArray(data?.actions) && data.actions.length > 0) {
+      await executeActions(data.actions, jid);
+    }
     return reply;
   } catch (err) {
     console.error("AI reply failed:", err);
@@ -261,6 +352,23 @@ function extractText(message) {
     message?.videoMessage?.caption ||
     ""
   ).trim();
+}
+
+// "poll: <question>? <option>, <option>, ..." — a quick way to get a group
+// decision without someone manually tallying replies.
+const POLL_PATTERN = /^\s*poll\s*[:\-]\s*(.+?)\?\s*(.+)/i;
+
+function parsePoll(text) {
+  const m = text.match(POLL_PATTERN);
+  if (!m) return null;
+  const question = m[1].trim();
+  const options = m[2]
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean)
+    .slice(0, 12); // WhatsApp's own poll option limit
+  if (!question || options.length < 2) return null;
+  return { question, options };
 }
 
 // "poster: <description>" / "poster <description>" / "make a poster of..."
@@ -286,11 +394,14 @@ async function generatePoster(prompt, referenceImage) {
  * incoming message itself is a photo with a "poster: ..." caption, or it's
  * a text reply quoting an earlier photo ("poster: use this logo" as a
  * reply to a logo image). Returns { data: base64, mimeType } or null. */
-/** Finds an image or voice/audio message to work with, whether it's the
- * message itself (a photo with a "poster: ..." caption, a voice note sent
- * directly) or it's a text reply quoting an earlier one ("Leo, what does
- * this say" as a reply to a photo or voice note someone sent earlier).
- * Returns { data: base64, mimeType, kind: 'image' | 'audio' } or null. */
+/** Finds an image, voice/audio, or document (PDF) message to work with,
+ * whether it's the message itself (a photo with a "poster: ..." caption, a
+ * voice note sent directly, a forwarded PDF) or it's a text reply quoting
+ * an earlier one ("Leo, what does this say" as a reply to a photo, voice
+ * note, or document someone sent earlier). Gemini accepts PDFs the same
+ * way as images — as an inlineData part — so no separate parsing needed.
+ * Returns { data: base64, mimeType, kind: 'image' | 'audio' | 'document' }
+ * or null. */
 async function getAttachment(activeSock, msg) {
   let mediaMessage = null;
   let kind = null;
@@ -302,6 +413,9 @@ async function getAttachment(activeSock, msg) {
   } else if (msg.message?.audioMessage) {
     mediaMessage = { audioMessage: msg.message.audioMessage };
     kind = "audio";
+  } else if (msg.message?.documentMessage) {
+    mediaMessage = { documentMessage: msg.message.documentMessage };
+    kind = "document";
   } else {
     const ctx = msg.message?.extendedTextMessage?.contextInfo;
     const quotedKey = {
@@ -318,6 +432,10 @@ async function getAttachment(activeSock, msg) {
       mediaMessage = { audioMessage: ctx.quotedMessage.audioMessage };
       kind = "audio";
       key = quotedKey;
+    } else if (ctx?.quotedMessage?.documentMessage) {
+      mediaMessage = { documentMessage: ctx.quotedMessage.documentMessage };
+      kind = "document";
+      key = quotedKey;
     }
   }
 
@@ -330,10 +448,11 @@ async function getAttachment(activeSock, msg) {
       {},
       { logger, reuploadRequest: activeSock.updateMediaMessage }
     );
-    const inner = mediaMessage.imageMessage || mediaMessage.audioMessage;
+    const inner = mediaMessage.imageMessage || mediaMessage.audioMessage || mediaMessage.documentMessage;
+    const defaultMime = kind === "image" ? "image/jpeg" : kind === "audio" ? "audio/ogg" : "application/pdf";
     return {
       data: buffer.toString("base64"),
-      mimeType: inner.mimetype || (kind === "image" ? "image/jpeg" : "audio/ogg"),
+      mimeType: inner.mimetype || defaultMime,
       kind,
     };
   } catch (err) {
@@ -482,6 +601,62 @@ async function runScheduler() {
   }
 }
 
+// --- Daily ops digest (opt-in) ---------------------------------------------
+// Off by default — set DAILY_DIGEST_JID (e.g. Ms. Lahiruka's own WhatsApp
+// number as a JID) to get a once-a-day morning summary of new leads/tasks
+// logged through WhatsApp in the last 24h, instead of needing to check the
+// dashboard. Checked periodically rather than on a precise cron, so "once a
+// day" means "once per local calendar day, the first time this check runs
+// at/after 8am Colombo time" — close enough for a digest, not exact-to-the-
+// minute like a reminder needs to be.
+const DIGEST_META_REF = db.collection("meta").doc("dailyDigest");
+
+async function maybeSendDailyDigest() {
+  if (!DAILY_DIGEST_JID || !sock || socketState !== "open") return;
+
+  const now = new Date();
+  const localDateStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Colombo" }); // YYYY-MM-DD
+  const localHour = Number(
+    now.toLocaleString("en-US", { timeZone: "Asia/Colombo", hour: "2-digit", hour12: false })
+  );
+  if (localHour < 8) return;
+
+  try {
+    const metaDoc = await DIGEST_META_REF.get();
+    if (metaDoc.exists && metaDoc.data()?.lastSentDate === localDateStr) return;
+
+    const since = Date.now() - 24 * 60 * 60 * 1000;
+    const [leadsSnap, tasksSnap] = await Promise.all([
+      LEADS.where("createdAt", ">=", since).get(),
+      TASKS.where("createdAt", ">=", since).get(),
+    ]);
+
+    if (leadsSnap.empty && tasksSnap.empty) {
+      await DIGEST_META_REF.set({ lastSentDate: localDateStr }, { merge: true });
+      return; // nothing to report — stay quiet rather than a pointless "0 and 0" ping
+    }
+
+    const lines = [
+      "Morning digest — last 24h:",
+      `• ${leadsSnap.size} new lead${leadsSnap.size === 1 ? "" : "s"}`,
+      `• ${tasksSnap.size} new task${tasksSnap.size === 1 ? "" : "s"}`,
+    ];
+    if (!leadsSnap.empty) {
+      lines.push("", "Leads:");
+      leadsSnap.docs.slice(0, 10).forEach((d) => lines.push(`- ${d.data().title}`));
+    }
+    if (!tasksSnap.empty) {
+      lines.push("", "Tasks:");
+      tasksSnap.docs.slice(0, 10).forEach((d) => lines.push(`- ${d.data().title}`));
+    }
+
+    await sock.sendMessage(DAILY_DIGEST_JID, { text: lines.join("\n") });
+    await DIGEST_META_REF.set({ lastSentDate: localDateStr }, { merge: true });
+  } catch (err) {
+    console.error("Daily digest failed:", err);
+  }
+}
+
 // How long to wait after the last message in a chat before actually
 // processing it. Without this, someone typing a thought across several
 // quick messages ("remind me" / "in 10 minutes" / "to call the vendor")
@@ -502,21 +677,42 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
     // bare photo/voice note with no text gets a readable placeholder
     // instead of an empty history entry.
     await ensureHistoryLoaded(remoteJid);
-    const historyText =
-      askText || (attachment ? (attachment.kind === "image" ? "[image]" : "[voice message]") : "");
+    const attachmentPlaceholder =
+      attachment?.kind === "image"
+        ? "[image]"
+        : attachment?.kind === "audio"
+          ? "[voice message]"
+          : attachment?.kind === "document"
+            ? "[document]"
+            : "";
+    const historyText = askText || attachmentPlaceholder;
     remember(remoteJid, "user", historyText);
 
     // Learn who's speaking, silently — never changes what gets replied.
     maybeLearnIntroduction(senderJid, askText).catch(() => {});
 
         const rememberMatch = askText.match(REMEMBER_PATTERN);
-        const posterMatch = !rememberMatch ? askText.match(POSTER_PATTERN) : null;
-        const reminder = !rememberMatch ? parseReminder(askText) : null;
-        const groupSend = !rememberMatch && !reminder ? parseGroupSend(askText) : null;
+        const whatRemember = !rememberMatch && WHAT_REMEMBER_PATTERN.test(askText);
+        const forgetMe = !rememberMatch && !whatRemember && FORGET_ME_PATTERN.test(askText);
+        const pollMatch = !rememberMatch && !whatRemember && !forgetMe ? parsePoll(askText) : null;
+        const posterMatch = !rememberMatch && !whatRemember && !forgetMe && !pollMatch ? askText.match(POSTER_PATTERN) : null;
+        const reminder = !rememberMatch && !whatRemember && !forgetMe && !pollMatch ? parseReminder(askText) : null;
+        const groupSend =
+          !rememberMatch && !whatRemember && !forgetMe && !pollMatch && !reminder ? parseGroupSend(askText) : null;
 
         if (HELP_PATTERN.test(askText)) {
           await activeSock.sendMessage(remoteJid, { text: HELP_TEXT });
           remember(remoteJid, "assistant", HELP_TEXT);
+        } else if (whatRemember) {
+          const text = await describeWhatIsRemembered(senderJid);
+          await activeSock.sendMessage(remoteJid, { text });
+          remember(remoteJid, "assistant", text);
+        } else if (forgetMe) {
+          await forgetPerson(senderJid);
+          const text =
+            "Done — I've forgotten your name/role. (Your message history in this chat stays, same as any WhatsApp chat — this only clears what I knew about who you are.)";
+          await activeSock.sendMessage(remoteJid, { text });
+          remember(remoteJid, "assistant", text);
         } else if (rememberMatch) {
           const fact = rememberMatch[1].trim();
           await rememberFact(fact, senderJid, isGroup ? "group" : "dm");
@@ -532,6 +728,28 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
               createdAt: Date.now(),
             })
             .catch(() => {});
+        } else if (pollMatch) {
+          try {
+            await activeSock.sendMessage(remoteJid, {
+              poll: { name: pollMatch.question, values: pollMatch.options, selectableCount: 1 },
+            });
+            const confirmText = `Poll sent: "${pollMatch.question}"`;
+            remember(remoteJid, "assistant", confirmText);
+            await db
+              .collection("activity")
+              .add({
+                title: "Sent a poll on WhatsApp",
+                detail: pollMatch.question.slice(0, 60),
+                type: "ok",
+                createdAt: Date.now(),
+              })
+              .catch(() => {});
+          } catch (err) {
+            console.error("Failed to send poll:", err);
+            const errText = "Couldn't send that poll — try again shortly.";
+            await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
+            remember(remoteJid, "assistant", errText);
+          }
         } else if (posterMatch) {
           const prompt = posterMatch[1].trim();
           try {
@@ -645,7 +863,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             .collection("activity")
             .add({
               title: attachment
-                ? `Read a${attachment.kind === "image" ? "n image" : " voice message"} on WhatsApp`
+                ? `Read a${attachment.kind === "image" ? "n image" : attachment.kind === "document" ? " document" : " voice message"} on WhatsApp`
                 : "Replied on WhatsApp",
               detail: isGroup ? `Group message: "${historyText.slice(0, 60)}"` : `DM: "${historyText.slice(0, 60)}"`,
               type: "ok",
@@ -673,7 +891,8 @@ function attachMessageHandler(activeSock) {
         const text = extractText(msg.message);
         const hasImage = Boolean(msg.message?.imageMessage);
         const hasAudio = Boolean(msg.message?.audioMessage);
-        const hasMedia = hasImage || hasAudio;
+        const hasDocument = Boolean(msg.message?.documentMessage);
+        const hasMedia = hasImage || hasAudio || hasDocument;
         if (!text && !hasMedia) continue;
 
         const isGroup = remoteJid.endsWith("@g.us");
@@ -699,7 +918,7 @@ function attachMessageHandler(activeSock) {
         // Prefer a message that actually carries (or quotes) media over a
         // plain text one, so poster/vision/voice lookups find it.
         const quotedCtx = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        if (hasMedia || quotedCtx?.imageMessage || quotedCtx?.audioMessage) {
+        if (hasMedia || quotedCtx?.imageMessage || quotedCtx?.audioMessage || quotedCtx?.documentMessage) {
           entry.representativeMsg = msg;
         }
 
@@ -882,5 +1101,9 @@ if (fs.existsSync(AUTH_DIR) && fs.readdirSync(AUTH_DIR).length > 0) {
 // Reminders and scheduled group messages — checked frequently enough that
 // "remind me in 5 minutes" is actually useful, not just daily digests.
 setInterval(runScheduler, 20_000);
+
+// The digest itself only needs to be checked a few times around the
+// morning, not every 20s — every 10 minutes is plenty.
+setInterval(maybeSendDailyDigest, 10 * 60_000);
 
 process.on("SIGTERM", () => process.exit(0));

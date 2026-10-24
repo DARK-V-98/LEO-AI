@@ -52,16 +52,30 @@ dates, not the AI — so these are fast and don't cost an AI call):
   `tell group Ops tomorrow at 9am: deploy window starts` — schedules it
   for then instead. LEO only matches against groups he's actually a
   member of; if the name doesn't match, he says so rather than guessing.
-- **Voice messages and images** (DMs always, groups when addressed) — send
-  a voice note and he transcribes + responds to what was said; send a
-  photo (of a document, whiteboard, anything) and he reads/describes it.
-  Works as a reply too: send a photo or voice note with no mention at
+- **Voice messages, images, and documents** (DMs always, groups when
+  addressed) — send a voice note and he transcribes + responds to what
+  was said; send a photo (of a document, whiteboard, anything) and he
+  reads/describes it; send a PDF (a brochure, a contract, a form) and he
+  reads that too — Gemini accepts PDFs the same way as images. Works as a
+  reply too: send a photo, voice note, or document with no mention at
   all, then later reply to it with "Leo, what does this say?" — he
   resolves the quoted media and answers about that, not the reply text
-  alone. In a group, a bare photo/voice note with no "Leo" mention is
-  left alone entirely — he only engages when actually addressed, in that
-  message or in a reply to it. Verified end-to-end against the real
-  Gemini API for both image and audio input before shipping.
+  alone. In a group, a bare photo/voice note/document with no "Leo"
+  mention is left alone entirely — he only engages when actually
+  addressed, in that message or in a reply to it. Image/audio verified
+  end-to-end against the real Gemini API before shipping; PDF support
+  follows the identical code path but hasn't been separately re-verified.
+- **Leads and tasks get logged automatically** — mention a new lead
+  ("just got a call from someone asking about the AI Diploma, log them,
+  her number is...") or something to track ("tell the design team to
+  prep the banner by Friday") in normal conversation, and Gemini's own
+  tool-calling decides to log it — no exact phrasing needed, unlike the
+  patterns below. Written straight to the same `leads`/`tasks` Firestore
+  collections the dashboard's Overview/To-Do/Leads tabs already read, so
+  it shows up there immediately, tagged with `source: "whatsapp"`.
+- **Polls**: `poll: what time works for lunch? 12pm, 1pm, 2pm` sends an
+  actual WhatsApp poll to the chat instead of people manually tallying
+  replies (2–12 options).
 
 - **Every message is saved** — every DM and group message either side
   sends is permanently stored in Firestore (`whatsappChats/{chatJid}/
@@ -86,6 +100,17 @@ dates, not the AI — so these are fast and don't cost an AI call):
   list of everything above. Deliberately a fixed, hand-written message
   (not asked of the AI) so it can never drift out of sync with what's
   actually implemented.
+- **"what do you remember about me" / "forget about me"** — check or
+  clear your saved name/role (the `people` record from introducing
+  yourself). Doesn't touch your message history, same as nobody can
+  selectively erase one WhatsApp message from a real chat — this only
+  clears who LEO thinks you are.
+- **Daily ops digest (opt-in, off by default)** — set `DAILY_DIGEST_JID`
+  (see Variables below) and LEO sends a once-a-day morning summary of new
+  leads/tasks logged through WhatsApp in the last 24h to that number.
+  Stays quiet on a day with nothing new, rather than pinging "0 leads, 0
+  tasks". Checked periodically, not a precise cron — "once a day" means
+  the first check at/after 8am Colombo time, not exact-to-the-minute.
 
 `companyKnowledge` starts pre-seeded (on first boot, if empty) with:
 SmartLabs is an educational institute; Ms. Lahiruka is the Managing
@@ -94,13 +119,14 @@ the websites, and the other systems. Add more anytime with "remember
 that ...", or edit the `companyKnowledge` collection directly in the
 Firebase console.
 
-These are checked in this order: help, remember, poster, reminder, then
-group-send, then falls through to a normal AI chat reply — so a message
-needs to clearly match one of the patterns above to trigger it instead of
-just being answered conversationally. Reminders and scheduled group
-messages are stored in Firestore (`scheduledMessages`) and a
-20-second-interval check inside this same worker sends them once due —
-no separate cron job needed.
+These are checked in this order: help, "what do you remember"/"forget
+me", remember, poll, poster, reminder, then group-send, then falls
+through to a normal AI chat reply (where lead/task logging can kick in
+via tool-calling) — so a message needs to clearly match one of the
+keyword patterns above to trigger it instead of being handled
+conversationally. Reminders and scheduled group messages are stored in
+Firestore (`scheduledMessages`) and a 20-second-interval check inside
+this same worker sends them once due — no separate cron job needed.
 
 **Rapid-fire messages get combined, not confused.** If several messages
 arrive in the same chat within 3 seconds of each other — someone typing
@@ -150,6 +176,15 @@ separate repo — just point it at this folder inside `LEO-AI`.
      stay silent.
    - `AUTH_DIR` — leave unset to use the default (`./auth_info`), or set
      it if you're mounting a volume somewhere specific (see step 4).
+   - `DAILY_DIGEST_JID` — optional. A WhatsApp JID (e.g.
+     `94771234567@s.whatsapp.net`) to send the once-a-day leads/tasks
+     digest to. Leave unset to skip the digest entirely.
+   - `REMINDER_TZ_OFFSET_MINUTES` — optional, defaults to `330` (Sri
+     Lanka, UTC+5:30). Only change this if the team isn't in that
+     timezone.
+   - `GEMINI_DAILY_CALL_BUDGET` — optional, defaults to `1500`. A
+     soft daily cap on Gemini calls (set on the website project, not
+     here) — see the website's own env docs.
 4. Deploy. Check the **Deployments → Logs** tab — you should see:
    ```
    LEO WhatsApp bridge is up. Waiting for a link request from the dashboard…
