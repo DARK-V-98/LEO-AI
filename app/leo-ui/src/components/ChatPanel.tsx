@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Mic, Send, ShieldCheck, Check, X, Volume2, VolumeX } from "lucide-react";
 import LeoOrb, { LeoMood } from "./LeoOrb";
 import { useSpeech } from "@/hooks/useSpeech";
+import { useDictation } from "@/hooks/useDictation";
 
 type Message = {
   id: string;
@@ -40,10 +41,11 @@ const INITIAL_MESSAGES: Message[] = [
 export default function ChatPanel() {
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
   const [input, setInput] = useState("");
-  const [listening, setListening] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [voiceOn, setVoiceOn] = useState(true);
   const { speak, cancel, speaking } = useSpeech();
+  const dictation = useDictation();
+  const listening = dictation.active;
 
   const mood: LeoMood = speaking
     ? "speaking"
@@ -53,8 +55,8 @@ export default function ChatPanel() {
         ? "listening"
         : "idle";
 
-  async function send() {
-    const text = input.trim();
+  async function send(overrideText?: string) {
+    const text = (overrideText ?? input).trim();
     if (!text || thinking) return;
 
     const nextMessages = [
@@ -98,6 +100,16 @@ export default function ChatPanel() {
   function toggleVoice() {
     if (voiceOn) cancel();
     setVoiceOn((v) => !v);
+  }
+
+  function handleMicClick() {
+    if (dictation.active) {
+      const text = dictation.stop();
+      if (text) send(text);
+    } else {
+      cancel(); // don't let LEO's own voice bleed into the mic
+      dictation.start();
+    }
   }
 
   function resolveConfirm(id: string, approved: boolean) {
@@ -215,8 +227,16 @@ export default function ChatPanel() {
       <div className="border-t border-panel-border p-3">
         <div className="flex items-center gap-2 rounded-xl border border-panel-border bg-white/[0.02] px-3 py-2">
           <button
-            onClick={() => setListening((v) => !v)}
-            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg transition-colors ${
+            onClick={handleMicClick}
+            disabled={!dictation.supported}
+            title={
+              dictation.supported
+                ? listening
+                  ? "Stop and send"
+                  : "Talk to LEO"
+                : "Voice input isn't supported in this browser"
+            }
+            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-30 ${
               listening
                 ? "bg-accent-magenta/20 text-accent-magenta"
                 : "text-muted hover:text-accent-cyan"
@@ -226,17 +246,22 @@ export default function ChatPanel() {
           </button>
 
           {listening ? (
-            <div className="flex h-5 flex-1 items-center gap-0.5">
-              {Array.from({ length: 24 }).map((_, i) => (
-                <span
-                  key={i}
-                  className="eq-bar w-[3px] rounded-full bg-accent-magenta"
-                  style={{
-                    height: `${30 + ((i * 37) % 60)}%`,
-                    animationDelay: `${(i % 6) * 0.12}s`,
-                  }}
-                />
-              ))}
+            <div className="flex flex-1 items-center gap-2 overflow-hidden">
+              <div className="flex h-5 items-center gap-0.5">
+                {Array.from({ length: 14 }).map((_, i) => (
+                  <span
+                    key={i}
+                    className="eq-bar w-[3px] rounded-full bg-accent-magenta"
+                    style={{
+                      height: `${30 + ((i * 37) % 60)}%`,
+                      animationDelay: `${(i % 6) * 0.12}s`,
+                    }}
+                  />
+                ))}
+              </div>
+              <span className="truncate text-xs text-muted">
+                {dictation.transcript || "listening…"}
+              </span>
             </div>
           ) : (
             <input
@@ -249,8 +274,8 @@ export default function ChatPanel() {
           )}
 
           <button
-            onClick={send}
-            disabled={thinking}
+            onClick={() => send()}
+            disabled={thinking || listening}
             className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-accent-cyan transition-colors hover:bg-accent-cyan/10 disabled:opacity-40"
           >
             <Send size={15} />

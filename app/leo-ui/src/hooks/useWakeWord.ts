@@ -21,12 +21,14 @@ export function useWakeWord(onWake: (commandSoFar: string) => void) {
   const awakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onWakeRef = useRef(onWake);
   onWakeRef.current = onWake;
+  const enabledRef = useRef(false);
 
   const supported =
     typeof window !== "undefined" &&
     Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 
   const stop = useCallback(() => {
+    enabledRef.current = false;
     setEnabled(false);
     recognitionRef.current?.stop();
     recognitionRef.current = null;
@@ -85,8 +87,10 @@ export function useWakeWord(onWake: (commandSoFar: string) => void) {
 
     recognition.onend = () => {
       // continuous mode can still be cut off by the browser — restart
-      // automatically while the user has it switched on.
-      if (enabled) {
+      // automatically while the user has it switched on. Reads the ref
+      // (not the closed-over `enabled`) so a stop() that happened after
+      // this listener was created is still respected.
+      if (enabledRef.current) {
         try {
           recognition.start();
         } catch {
@@ -102,15 +106,16 @@ export function useWakeWord(onWake: (commandSoFar: string) => void) {
     } catch {
       /* no-op: already running */
     }
-  }, [supported, enabled]);
+  }, [supported]);
 
   const toggle = useCallback(() => {
-    if (enabled) {
+    if (enabledRef.current) {
       stop();
     } else {
+      enabledRef.current = true;
       setEnabled(true);
     }
-  }, [enabled, stop]);
+  }, [stop]);
 
   useEffect(() => {
     if (enabled) start();

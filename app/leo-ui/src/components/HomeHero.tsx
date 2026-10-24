@@ -55,7 +55,7 @@ export default function HomeHero({
     setTimeout(() => setGreeting(null), 2500);
   }
 
-  const { state: wakeState, enabled, toggle, supported } = useWakeWord((command) => {
+  const { state: wakeState, enabled, toggle, supported, lastTranscript } = useWakeWord((command) => {
     respondToWake(command);
   });
 
@@ -127,6 +127,12 @@ export default function HomeHero({
                     ? "Always on, say “Leo” anytime"
                     : "Wake-word listening is off"}
           </span>
+
+          {enabled ? (
+            <span className="max-w-xs truncate font-mono text-[10px] text-muted/70">
+              hearing: {lastTranscript || "…"}
+            </span>
+          ) : null}
         </div>
       )}
     </div>
