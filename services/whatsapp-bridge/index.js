@@ -11,6 +11,8 @@ import pino from "pino";
 import QRCode from "qrcode";
 import fs from "fs";
 import * as chrono from "chrono-node";
+import ffmpegPath from "ffmpeg-static";
+import { spawn } from "child_process";
 
 // --- Firebase Admin ------------------------------------------------------
 // Paste the full service account JSON (Firebase console -> Project
@@ -252,7 +254,7 @@ const HELP_TEXT = [
   '• "poll: <question>? <option>, <option>, ..." — sends a poll to this chat.',
   '• "remember that <fact>" — teaches me something to keep in mind going forward.',
   '• "what do you remember about me" / "forget about me" — check or clear what I know about you.',
-  "• Send a voice note, photo, or document (PDF) and I'll read/listen and respond — works as a reply to earlier media too.",
+  "• Send a voice note, photo, or document (PDF) and I'll read/listen and respond — works as a reply to earlier media too. Send a voice note and I'll reply with one too; say \"reply with voice\" anytime to get a voice note back.",
   "",
   "In the company group, say “Leo” so I know you're talking to me.",
 ].join("\n");
@@ -389,6 +391,57 @@ async function generatePoster(prompt, referenceImage) {
   }
   return res.json(); // { image: base64, mimeType, model }
 }
+
+// --- Voice replies ----------------------------------------------------
+// Gemini's TTS returns raw 16-bit PCM, not something WhatsApp can play as
+// a voice note directly — WhatsApp's "ptt" voice bubble specifically wants
+// OGG/Opus. ffmpeg-static bundles its own ffmpeg binary, so this works on
+// Railway without needing a system package. Verified end-to-end (the real
+// Gemini TTS call, the PCM, and this exact ffmpeg conversion) before
+// shipping; the one thing that couldn't be verified from here is how it
+// actually plays back on a phone, same caveat as the rest of this bridge.
+function pcmToOggOpus(pcmBuffer, sampleRate) {
+  return new Promise((resolve, reject) => {
+    const args = [
+      "-f", "s16le", "-ar", String(sampleRate), "-ac", "1", "-i", "pipe:0",
+      "-c:a", "libopus", "-ar", "16000", "-ac", "1", "-application", "voip",
+      "-f", "ogg", "pipe:1",
+    ];
+    const proc = spawn(ffmpegPath, args);
+    const chunks = [];
+    proc.stdout.on("data", (c) => chunks.push(c));
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0) resolve(Buffer.concat(chunks));
+      else reject(new Error(`ffmpeg exited with code ${code}`));
+    });
+    proc.stdin.write(pcmBuffer);
+    proc.stdin.end();
+  });
+}
+
+async function synthesizeVoiceReply(text) {
+  if (!WEB_BASE_URL) return null;
+  try {
+    const res = await fetch(`${WEB_BASE_URL}/api/tts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data?.audio) return null;
+    const pcm = Buffer.from(data.audio, "base64");
+    return await pcmToOggOpus(pcm, data.sampleRate || 24000);
+  } catch (err) {
+    console.error("Voice reply synthesis failed:", err);
+    return null;
+  }
+}
+
+// Asking for a voice reply explicitly, in either language's phrasing.
+const VOICE_REQUEST_PATTERN =
+  /\b(voice reply|reply (?:with|in) (?:a )?voice|say (?:that|it) (?:as a voice|out loud)|send (?:that|it)? ?as (?:a )?voice (?:note|message))\b/i;
 
 /** Looks for an image to use as a style/content reference: either the
  * incoming message itself is a photo with a "poster: ..." caption, or it's
@@ -858,13 +911,34 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           }
         } else {
           const reply = await askLeo(remoteJid, attachment);
-          await activeSock.sendMessage(remoteJid, { text: reply });
+
+          // Reply with a voice note instead of text when: the incoming
+          // message was itself a voice note (hands-free, symmetric — you
+          // spoke, he speaks back), or it was explicitly asked for.
+          const wantsVoice = attachment?.kind === "audio" || VOICE_REQUEST_PATTERN.test(askText);
+          let sentVoice = false;
+          if (wantsVoice) {
+            const ogg = await synthesizeVoiceReply(reply).catch((err) => {
+              console.error("Voice reply failed:", err);
+              return null;
+            });
+            if (ogg) {
+              await activeSock.sendMessage(remoteJid, { audio: ogg, mimetype: "audio/ogg; codecs=opus", ptt: true });
+              sentVoice = true;
+            }
+          }
+          if (!sentVoice) {
+            await activeSock.sendMessage(remoteJid, { text: reply });
+          }
+
           await db
             .collection("activity")
             .add({
               title: attachment
                 ? `Read a${attachment.kind === "image" ? "n image" : attachment.kind === "document" ? " document" : " voice message"} on WhatsApp`
-                : "Replied on WhatsApp",
+                : sentVoice
+                  ? "Replied on WhatsApp with a voice note"
+                  : "Replied on WhatsApp",
               detail: isGroup ? `Group message: "${historyText.slice(0, 60)}"` : `DM: "${historyText.slice(0, 60)}"`,
               type: "ok",
               createdAt: Date.now(),

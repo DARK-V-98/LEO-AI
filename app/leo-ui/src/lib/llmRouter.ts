@@ -43,6 +43,47 @@ function recordGeminiCall(): void {
   budgetUsed += 1;
 }
 
+export type SpeechResult = { audio: string; sampleRate: number };
+
+/** Gemini's TTS model, returning raw 16-bit PCM — verified live against
+ * the real API before wiring this in (gemini-2.5-flash-preview-tts returns
+ * `audio/L16;codec=pcm;rate=24000`, confirmed for both English and Sinhala
+ * script input). Whoever calls this is responsible for turning that into
+ * whatever container/codec they actually need (the WhatsApp bridge
+ * converts it to OGG/Opus for a voice note) — this app has no ffmpeg
+ * available to do that itself. */
+export async function generateSpeech(text: string): Promise<SpeechResult | null> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || !text.trim()) return null;
+  if (!withinGeminiBudget()) return null;
+
+  try {
+    recordGeminiCall();
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${key}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text }] }],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } },
+          },
+        }),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const part = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+    if (!part?.data) return null;
+    const rateMatch = /rate=(\d+)/.exec(part.mimeType || "");
+    return { audio: part.data as string, sampleRate: rateMatch ? Number(rateMatch[1]) : 24000 };
+  } catch {
+    return null;
+  }
+}
+
 const SYSTEM_PROMPT =
   "You are LEO, the always-on AI operator for SmartLabs. You help staff with " +
   "daily to-dos, leads, ad performance, SEO, LMS admin, and scheduling. Keep " +

@@ -65,6 +65,16 @@ dates, not the AI — so these are fast and don't cost an AI call):
   addressed, in that message or in a reply to it. Image/audio verified
   end-to-end against the real Gemini API before shipping; PDF support
   follows the identical code path but hasn't been separately re-verified.
+- **Voice replies** — send a voice note and LEO replies with one back
+  (hands-free, symmetric), or say "reply with voice"/"say that as a
+  voice message" anytime to get a voice note instead of text. Uses
+  Gemini's TTS model, converted to OGG/Opus via a bundled `ffmpeg-static`
+  binary (no system package needed on Railway) since that's the codec
+  WhatsApp's voice-note bubble actually needs. The TTS call, the raw PCM
+  it returns (English and Sinhala both confirmed), and this exact
+  ffmpeg conversion were all verified live before shipping — the one
+  thing that couldn't be verified from here is how it actually sounds
+  and plays back on a real phone.
 - **Leads and tasks get logged automatically** — mention a new lead
   ("just got a call from someone asking about the AI Diploma, log them,
   her number is...") or something to track ("tell the design team to
