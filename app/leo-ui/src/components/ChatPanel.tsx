@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Mic, Send, ShieldCheck, Check, X } from "lucide-react";
-import AiOrb from "./AiOrb";
+import { Mic, Send, ShieldCheck, Check, X, Volume2, VolumeX } from "lucide-react";
+import LeoOrb, { LeoMood } from "./LeoOrb";
+import { useSpeech } from "@/hooks/useSpeech";
 
 type Message = {
   id: string;
@@ -41,6 +42,16 @@ export default function ChatPanel() {
   const [input, setInput] = useState("");
   const [listening, setListening] = useState(false);
   const [thinking, setThinking] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(true);
+  const { speak, cancel, speaking } = useSpeech();
+
+  const mood: LeoMood = speaking
+    ? "speaking"
+    : thinking
+      ? "thinking"
+      : listening
+        ? "listening"
+        : "idle";
 
   async function send() {
     const text = input.trim();
@@ -66,26 +77,27 @@ export default function ChatPanel() {
         }),
       });
       const data = await res.json();
+      const reply: string = data.reply ?? "Sorry, I didn't catch that — try again?";
       setMessages((m) => [
         ...m,
-        {
-          id: crypto.randomUUID(),
-          from: "leo",
-          text: data.reply ?? "Sorry, I didn't catch that — try again?",
-        },
+        { id: crypto.randomUUID(), from: "leo", text: reply },
       ]);
-    } catch {
-      setMessages((m) => [
-        ...m,
-        {
-          id: crypto.randomUUID(),
-          from: "leo",
-          text: "I couldn't reach my systems just now — try again shortly.",
-        },
-      ]);
-    } finally {
       setThinking(false);
+      if (voiceOn) await speak(reply);
+    } catch {
+      const reply = "I couldn't reach my systems just now — try again shortly.";
+      setMessages((m) => [
+        ...m,
+        { id: crypto.randomUUID(), from: "leo", text: reply },
+      ]);
+      setThinking(false);
+      if (voiceOn) await speak(reply);
     }
+  }
+
+  function toggleVoice() {
+    if (voiceOn) cancel();
+    setVoiceOn((v) => !v);
   }
 
   function resolveConfirm(id: string, approved: boolean) {
@@ -110,21 +122,30 @@ export default function ChatPanel() {
     <div className="glass-panel scanline relative flex h-full flex-col overflow-hidden rounded-2xl">
       <div className="flex items-center justify-between border-b border-panel-border px-5 py-4">
         <div className="flex items-center gap-3">
-          <AiOrb size={32} status={listening ? "listening" : "online"} />
+          <LeoOrb size={32} mood={mood} />
           <div>
             <p className="text-sm font-semibold text-foreground">Ask LEO</p>
             <p className="font-mono text-[11px] text-muted">
-              {listening ? "LISTENING…" : "voice + text · multi-model"}
+              {speaking ? "SPEAKING…" : listening ? "LISTENING…" : "voice + text"}
             </p>
           </div>
         </div>
-        <span className="flex items-center gap-1 rounded-full border border-panel-border px-2 py-1 text-[10px] text-muted">
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75 animate-ping" />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-green" />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleVoice}
+            className="flex items-center gap-1 rounded-full border border-panel-border px-2 py-1 text-[10px] text-muted transition-colors hover:text-foreground"
+            title={voiceOn ? "Mute LEO's voice" : "Unmute LEO's voice"}
+          >
+            {voiceOn ? <Volume2 size={11} /> : <VolumeX size={11} />}
+          </button>
+          <span className="flex items-center gap-1 rounded-full border border-panel-border px-2 py-1 text-[10px] text-muted">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75 animate-ping" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent-green" />
+            </span>
+            LEO Engine
           </span>
-          LEO Engine
-        </span>
+        </div>
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">

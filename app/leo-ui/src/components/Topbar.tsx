@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Bell, ChevronDown, Wifi } from "lucide-react";
-import AiOrb from "./AiOrb";
+import LeoOrb from "./LeoOrb";
 
 export default function Topbar() {
   const [time, setTime] = useState<string>("");
@@ -17,7 +17,7 @@ export default function Topbar() {
   return (
     <header className="glass-panel flex items-center justify-between rounded-2xl px-5 py-3">
       <div className="flex items-center gap-4">
-        <AiOrb size={40} status="online" />
+        <LeoOrb size={40} mood="idle" />
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-semibold text-foreground">

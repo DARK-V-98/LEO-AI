@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Mic, MicOff, Ear, ShieldCheck, Check, X } from "lucide-react";
-import LeoFace, { LeoMood } from "./LeoFace";
+import LeoOrb, { LeoMood } from "./LeoOrb";
 import { useWakeWord } from "@/hooks/useWakeWord";
 import { MicPermissionState } from "@/hooks/useMicPermission";
 import { useVoiceId } from "@/hooks/useVoiceId";
-import { subscribeVoiceProfiles, matchVoiceProfile, VoiceProfile } from "@/lib/voiceProfiles";
+import { useSpeech } from "@/hooks/useSpeech";
+import { subscribeVoiceProfiles, matchVoiceProfile, touchVoiceProfile, VoiceProfile } from "@/lib/voiceProfiles";
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export default function HomeHero({
   onHeardCommand,
@@ -21,34 +24,39 @@ export default function HomeHero({
   const [mood, setMood] = useState<LeoMood>("idle");
   const [greeting, setGreeting] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<VoiceProfile[]>([]);
-  const moodTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const { captureSignature } = useVoiceId();
+  const { speak } = useSpeech();
 
   useEffect(() => subscribeVoiceProfiles(setProfiles), []);
 
-  function runMoodCycle() {
-    moodTimers.current.forEach(clearTimeout);
-    moodTimers.current = [];
+  async function respondToWake(command: string) {
+    onHeardCommand(command || "(wake word only)");
     setMood("listening");
-    moodTimers.current.push(
-      setTimeout(() => setMood("thinking"), 1400),
-      setTimeout(() => setMood("speaking"), 2800),
-      setTimeout(() => setMood("idle"), 4600)
-    );
+    await delay(500);
+    setMood("thinking");
+
+    let name: string | undefined;
+    if (profiles.length > 0) {
+      const capture = await captureSignature(1000);
+      if (capture) {
+        const match = matchVoiceProfile(capture.signature, profiles);
+        if (match) {
+          name = match.name;
+          touchVoiceProfile(match.id, capture.signature);
+        }
+      }
+    }
+
+    const text = name ? `Hi ${name}, I'm listening.` : "I'm listening.";
+    setGreeting(text);
+    setMood("speaking");
+    await speak(text);
+    setMood("idle");
+    setTimeout(() => setGreeting(null), 2500);
   }
 
   const { state: wakeState, enabled, toggle, supported } = useWakeWord((command) => {
-    runMoodCycle();
-    onHeardCommand(command || "(wake word only)");
-
-    if (profiles.length > 0) {
-      captureSignature(1200).then((capture) => {
-        if (!capture) return;
-        const match = matchVoiceProfile(capture.signature, profiles);
-        setGreeting(match ? `Hi ${match.name}, I'm listening.` : "I don't recognise this voice yet.");
-        setTimeout(() => setGreeting(null), 4000);
-      });
-    }
+    respondToWake(command);
   });
 
   async function handleAllow() {
@@ -59,7 +67,7 @@ export default function HomeHero({
 
   return (
     <div className="glass-panel relative flex flex-col items-center gap-4 overflow-hidden rounded-2xl p-6">
-      <LeoFace mood={mood} size={168} />
+      <LeoOrb mood={mood} size={168} showLabel />
 
       {greeting ? (
         <div className="fade-up rounded-full border border-accent-cyan/30 bg-accent-cyan/5 px-4 py-1 text-xs text-foreground">
