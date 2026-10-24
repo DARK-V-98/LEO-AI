@@ -3,8 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export type WakeState = "idle" | "listening" | "awake" | "unsupported" | "denied";
+export type VoiceLang = "en-US" | "si-LK";
 
-const WAKE_PATTERN = /\bhey\s+leo\b|\bleo\b/i;
+const WAKE_PATTERN_EN = /\bhey\s+leo\b|\bleo\b/i;
+// Best-effort Sinhala phonetic spellings of "Leo" — speech recognition
+// transcribes names inconsistently, so this is approximate, not exact.
+const WAKE_PATTERN_SI = /\bලියෝ\b|\bhey\s+leo\b|\bleo\b/i;
 
 // How long to wait, after the last bit of new speech, before treating the
 // command as finished and handing it off. Without this, the hook used to
@@ -18,8 +22,12 @@ const COLLECT_SILENCE_MS = 1000;
  * Only once a full command is collected (speech pauses) does anything get
  * handed to the AI layer, same as a phone's "Hey Siri" detector sitting in
  * front of the actual assistant.
+ *
+ * `lang` picks the recognition language (speech recognition only supports
+ * one at a time). Changing it only takes effect the next time listening is
+ * turned on — it won't live-swap mid-session.
  */
-export function useWakeWord(onWake: (command: string) => void) {
+export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang = "en-US") {
   const [state, setState] = useState<WakeState>("idle");
   const [enabled, setEnabled] = useState(false);
   const [lastTranscript, setLastTranscript] = useState("");
@@ -29,6 +37,8 @@ export function useWakeWord(onWake: (command: string) => void) {
   const pendingCommand = useRef("");
   const onWakeRef = useRef(onWake);
   onWakeRef.current = onWake;
+  const langRef = useRef(lang);
+  langRef.current = lang;
   const enabledRef = useRef(false);
   const pausedRef = useRef(false);
 
@@ -62,7 +72,8 @@ export function useWakeWord(onWake: (command: string) => void) {
     const recognition = new Ctor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognition.lang = langRef.current;
+    const wakePattern = langRef.current === "si-LK" ? WAKE_PATTERN_SI : WAKE_PATTERN_EN;
 
     const finalizeCommand = () => {
       const command = pendingCommand.current;
@@ -79,14 +90,14 @@ export function useWakeWord(onWake: (command: string) => void) {
       setLastTranscript(transcript);
 
       if (!awakeRef.current) {
-        if (!WAKE_PATTERN.test(transcript)) return;
+        if (!wakePattern.test(transcript)) return;
         awakeRef.current = true;
         setState("awake");
       }
 
       // Whether this is the triggering event or a continuation, strip any
       // wake-word prefix and keep collecting until speech pauses.
-      pendingCommand.current = transcript.split(WAKE_PATTERN).pop()?.trim() ?? "";
+      pendingCommand.current = transcript.split(wakePattern).pop()?.trim() ?? "";
       clearCollectTimer();
       collectTimer.current = setTimeout(finalizeCommand, COLLECT_SILENCE_MS);
     };

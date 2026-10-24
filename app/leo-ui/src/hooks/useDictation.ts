@@ -1,16 +1,19 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { VoiceLang } from "./useWakeWord";
 
 /** Push-to-talk style dictation: start() begins transcribing speech into
  * `transcript` live, stop() ends it and returns the final text. Separate
  * from useWakeWord (which only watches for "Leo") — this is for when the
  * user is already in a chat and just wants to talk instead of type. */
-export function useDictation() {
+export function useDictation(lang: VoiceLang = "en-US") {
   const [transcript, setTranscript] = useState("");
   const [active, setActive] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const finalRef = useRef("");
+  const langRef = useRef(lang);
+  langRef.current = lang;
 
   const supported =
     typeof window !== "undefined" &&
@@ -22,7 +25,7 @@ export function useDictation() {
     const recognition = new Ctor();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognition.lang = langRef.current;
 
     finalRef.current = "";
     recognition.onresult = (event) => {

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Ear, ShieldCheck, Check, X, RotateCw, Settings2, ExternalLink } from "lucide-react";
 import LeoOrb, { LeoMood } from "./LeoOrb";
-import { useWakeWord } from "@/hooks/useWakeWord";
+import { useWakeWord, VoiceLang } from "@/hooks/useWakeWord";
 import { MicErrorKind, MicPermissionState } from "@/hooks/useMicPermission";
 import { useVoiceId } from "@/hooks/useVoiceId";
 import { useSpeech } from "@/hooks/useSpeech";
@@ -64,11 +64,13 @@ export default function HomeHero({
   micState,
   micError,
   onRequestMic,
+  voiceLang,
 }: {
   onHeardCommand: (text: string) => void;
   micState: MicPermissionState;
   micError: MicErrorKind | null;
   onRequestMic: () => Promise<boolean>;
+  voiceLang: VoiceLang;
 }) {
   const [micGateSeen, setMicGateSeen] = useState(false);
   const [mood, setMood] = useState<LeoMood>("idle");
@@ -90,7 +92,7 @@ export default function HomeHero({
     resume,
     supported,
     lastTranscript,
-  } = useWakeWord((command) => respondRef.current(command));
+  } = useWakeWord((command) => respondRef.current(command), voiceLang);
 
   async function identifySpeaker(): Promise<string | undefined> {
     if (profiles.length === 0) return undefined;
@@ -103,6 +105,7 @@ export default function HomeHero({
   }
 
   async function fetchAiReply(command: string): Promise<string> {
+    const isSinhala = voiceLang === "si-LK";
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -110,9 +113,14 @@ export default function HomeHero({
         body: JSON.stringify({ history: [{ role: "user", content: command }] }),
       });
       const data = await res.json();
-      return data.reply ?? "Sorry, I didn't catch that — could you say it again?";
+      return (
+        data.reply ??
+        (isSinhala ? "සමාවෙන්න, ආයෙත් කියන්න." : "Sorry, I didn't catch that — could you say it again?")
+      );
     } catch {
-      return "I couldn't reach my systems just now — try again shortly.";
+      return isSinhala
+        ? "දැන් system වලට reach වෙන්න බැරි උනා — ටිකකින් try කරන්න."
+        : "I couldn't reach my systems just now — try again shortly.";
     }
   }
 
@@ -128,9 +136,17 @@ export default function HomeHero({
     pause();
     setPendingLink(null);
 
+    const isSinhala = voiceLang === "si-LK";
+
     if (!command) {
       const name = await identifySpeaker();
-      const text = name ? `Hi ${name}, I'm listening.` : "I'm listening.";
+      const text = isSinhala
+        ? name
+          ? `ආයුබෝවන් ${name}, මම අහගෙන ඉන්නවා.`
+          : "මම අහගෙන ඉන්නවා."
+        : name
+          ? `Hi ${name}, I'm listening.`
+          : "I'm listening.";
       setGreeting(text);
       setMood("speaking");
       await speak(text);
@@ -144,8 +160,12 @@ export default function HomeHero({
     if (openCmd) {
       const win = window.open(openCmd.url, "_blank", "noopener,noreferrer");
       const text = win
-        ? `Opening ${openCmd.label} for you.`
-        : `I have ${openCmd.label} ready, but your browser blocked me from opening it automatically — tap the link below.`;
+        ? isSinhala
+          ? `${openCmd.label} විවෘත කරනවා.`
+          : `Opening ${openCmd.label} for you.`
+        : isSinhala
+          ? `${openCmd.label} ලෑස්ති, ඒත් browser eka auto-open block කළා — පහල link එක click කරන්න.`
+          : `I have ${openCmd.label} ready, but your browser blocked me from opening it automatically — tap the link below.`;
       setGreeting(text);
       if (!win) setPendingLink(openCmd);
       setMood("speaking");

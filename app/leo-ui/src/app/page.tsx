@@ -12,6 +12,7 @@ import VoicesPanel from "@/components/VoicesPanel";
 import HomeHero from "@/components/HomeHero";
 import BottomNav, { TabId } from "@/components/BottomNav";
 import { useMicPermission } from "@/hooks/useMicPermission";
+import { VoiceLang } from "@/hooks/useWakeWord";
 
 const TODO_ITEMS = [
   { id: 1, title: "Follow up with 3 new leads", subtitle: "Meta Ads — Diploma in AI campaign", meta: "High", accent: "magenta" as const },
@@ -44,13 +45,14 @@ const EVENT_ITEMS = [
 export default function Home() {
   const [tab, setTab] = useState<TabId>("home");
   const [lastHeard, setLastHeard] = useState<string | null>(null);
+  const [voiceLang, setVoiceLang] = useState<VoiceLang>("en-US");
   const mic = useMicPermission();
 
   return (
     <div className="relative flex min-h-screen w-full flex-col gap-4 p-4">
       <CodeRainBackground />
 
-      <Topbar />
+      <Topbar voiceLang={voiceLang} onVoiceLangChange={setVoiceLang} />
 
       <main className="mx-auto w-full max-w-5xl flex-1">
         {tab === "home" && (
@@ -60,6 +62,7 @@ export default function Home() {
               micError={mic.error}
               onRequestMic={mic.request}
               onHeardCommand={setLastHeard}
+              voiceLang={voiceLang}
             />
 
             {lastHeard ? (
@@ -101,7 +104,7 @@ export default function Home() {
 
         {tab === "chat" && (
           <div className="h-[70vh]">
-            <ChatPanel />
+            <ChatPanel voiceLang={voiceLang} />
           </div>
         )}
 

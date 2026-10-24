@@ -2,41 +2,56 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+const SINHALA_PATTERN = /[඀-෿]/;
+
 /** Wraps the browser's built-in speech synthesis so LEO can actually talk —
  * no extra API/key needed. Returns a promise that resolves once the line
- * finishes, so callers can sequence mood changes around it. */
+ * finishes, so callers can sequence mood changes around it. Auto-detects
+ * Sinhala text and switches voice/language accordingly. */
 export function useSpeech() {
   const [speaking, setSpeaking] = useState(false);
-  const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const voicesCacheRef = useRef<Record<string, SpeechSynthesisVoice | null>>({});
   const supported =
     typeof window !== "undefined" && "speechSynthesis" in window;
 
   useEffect(() => {
     if (!supported) return;
     const refresh = () => {
-      voiceRef.current = null;
+      voicesCacheRef.current = {};
     };
     window.speechSynthesis.addEventListener("voiceschanged", refresh);
     return () =>
       window.speechSynthesis.removeEventListener("voiceschanged", refresh);
   }, [supported]);
 
-  const pickVoice = useCallback(() => {
+  const pickVoice = useCallback((langPrefix: "en" | "si") => {
     if (!supported) return null;
-    if (voiceRef.current) return voiceRef.current;
+    if (langPrefix in voicesCacheRef.current) return voicesCacheRef.current[langPrefix];
+
     const voices = window.speechSynthesis.getVoices();
-    // Only ever pick from English voices — never fall back to voices[0],
-    // which can silently be a different language/accent and is what was
-    // making LEO's speech sound wrong.
-    const english = voices.filter((v) => v.lang.toLowerCase().startsWith("en"));
+    const matching = voices.filter((v) => v.lang.toLowerCase().startsWith(langPrefix));
     const preferred =
-      english.find((v) =>
-        /Google US English|Google UK English|Natural|Daniel|Matthew|Aria|Samantha/i.test(
-          v.name
-        )
-      ) ?? english[0];
-    voiceRef.current = preferred ?? null;
-    return voiceRef.current;
+      langPrefix === "en"
+        ? (matching.find((v) =>
+            /Google US English|Google UK English|Natural|Daniel|Matthew|Aria|Samantha/i.test(
+              v.name
+            )
+          ) ?? matching[0])
+        : matching[0];
+
+    voicesCacheRef.current[langPrefix] = preferred ?? null;
+    return preferred ?? null;
+  }, [supported]);
+
+  /** True if the device/browser has at least one installed Sinhala voice —
+   * many don't, in which case Sinhala text still gets spoken but with
+   * whatever default voice the browser falls back to for an unmatched
+   * language, which may mispronounce it. */
+  const hasSinhalaVoice = useCallback(() => {
+    if (!supported) return false;
+    return window.speechSynthesis
+      .getVoices()
+      .some((v) => v.lang.toLowerCase().startsWith("si"));
   }, [supported]);
 
   const speak = useCallback(
@@ -48,10 +63,13 @@ export function useSpeech() {
         }
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(text);
-        utter.lang = "en-US";
-        const voice = pickVoice();
+
+        const isSinhala = SINHALA_PATTERN.test(text);
+        utter.lang = isSinhala ? "si-LK" : "en-US";
+        const voice = pickVoice(isSinhala ? "si" : "en");
         if (voice) utter.voice = voice;
-        utter.rate = 1.03;
+
+        utter.rate = isSinhala ? 0.95 : 1.03;
         utter.pitch = 1.05;
         utter.onstart = () => setSpeaking(true);
         utter.onend = () => {
@@ -72,5 +90,5 @@ export function useSpeech() {
     setSpeaking(false);
   }, [supported]);
 
-  return { speak, cancel, speaking, supported };
+  return { speak, cancel, speaking, supported, hasSinhalaVoice };
 }

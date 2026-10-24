@@ -1,10 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, ChevronDown, Wifi } from "lucide-react";
+import { Bell, ChevronDown, Wifi, Languages } from "lucide-react";
 import LeoOrb from "./LeoOrb";
+import { VoiceLang } from "@/hooks/useWakeWord";
 
-export default function Topbar() {
+export default function Topbar({
+  voiceLang,
+  onVoiceLangChange,
+}: {
+  voiceLang: VoiceLang;
+  onVoiceLangChange: (lang: VoiceLang) => void;
+}) {
   const [time, setTime] = useState<string>("");
 
   useEffect(() => {
@@ -38,6 +45,33 @@ export default function Topbar() {
         <div className="hidden items-center gap-2 rounded-xl border border-panel-border px-3 py-1.5 text-xs text-muted md:flex">
           <Wifi size={14} className="text-accent-cyan" />
           4 connectors active
+        </div>
+
+        <div
+          className="flex items-center gap-1 rounded-xl border border-panel-border p-1 text-xs"
+          title="Voice input language (speak and he'll reply in the same one, too)"
+        >
+          <Languages size={13} className="ml-1 text-muted" />
+          <button
+            onClick={() => onVoiceLangChange("en-US")}
+            className={`rounded-lg px-2 py-1 transition-colors ${
+              voiceLang === "en-US"
+                ? "bg-accent-cyan/15 text-accent-cyan"
+                : "text-muted hover:text-foreground"
+            }`}
+          >
+            EN
+          </button>
+          <button
+            onClick={() => onVoiceLangChange("si-LK")}
+            className={`rounded-lg px-2 py-1 transition-colors ${
+              voiceLang === "si-LK"
+                ? "bg-accent-cyan/15 text-accent-cyan"
+                : "text-muted hover:text-foreground"
+            }`}
+          >
+            සිං
+          </button>
         </div>
 
         <button className="relative rounded-xl border border-panel-border p-2 text-muted transition-colors hover:text-foreground">

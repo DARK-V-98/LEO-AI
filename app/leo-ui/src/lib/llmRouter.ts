@@ -8,7 +8,13 @@ const SYSTEM_PROMPT =
   "You are LEO, the always-on AI operator for SmartLabs. You help staff with " +
   "daily to-dos, leads, ad performance, SEO, LMS admin, and scheduling. Keep " +
   "replies short, direct, and practical. Never mention which AI model or " +
-  "provider you run on.";
+  "provider you run on. You are fully fluent in both English and Sinhala " +
+  "(සිංහල). Always reply in the same language the user's latest message is " +
+  "written in — if they write or speak in Sinhala, reply entirely in " +
+  "Sinhala script, not transliterated or translated to English; if they " +
+  "use English, reply in English. Keep Sinhala replies natural and " +
+  "conversational, the way a Sri Lankan colleague would actually speak, " +
+  "not a stiff literal translation.";
 
 // Free-tier OpenRouter models, tried in order until one responds.
 const OPENROUTER_MODELS = [
@@ -92,19 +98,33 @@ async function tryGemini(messages: ChatMessage[]): Promise<string | null> {
   return null;
 }
 
+// Sinhala Unicode block.
+const SINHALA_PATTERN = /[඀-෿]/;
+
 /** Tries free-tier OpenRouter models first, falls back to Gemini, then a
- * generic offline reply so the chat never just breaks. */
+ * generic offline reply so the chat never just breaks. For Sinhala, Gemini
+ * goes first instead — the free OpenRouter models are noticeably weaker at
+ * it than Gemini is. */
 export async function generateReply(history: ChatMessage[]): Promise<string> {
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
     ...history,
   ];
 
-  const fromOpenRouter = await tryOpenRouter(messages);
-  if (fromOpenRouter) return fromOpenRouter;
+  const lastUserMessage = [...history].reverse().find((m) => m.role === "user");
+  const isSinhala = lastUserMessage ? SINHALA_PATTERN.test(lastUserMessage.content) : false;
 
-  const fromGemini = await tryGemini(messages);
-  if (fromGemini) return fromGemini;
+  if (isSinhala) {
+    const fromGemini = await tryGemini(messages);
+    if (fromGemini) return fromGemini;
+    const fromOpenRouter = await tryOpenRouter(messages);
+    if (fromOpenRouter) return fromOpenRouter;
+  } else {
+    const fromOpenRouter = await tryOpenRouter(messages);
+    if (fromOpenRouter) return fromOpenRouter;
+    const fromGemini = await tryGemini(messages);
+    if (fromGemini) return fromGemini;
+  }
 
   return "I'm having trouble reaching my model providers right now — try again in a moment.";
 }

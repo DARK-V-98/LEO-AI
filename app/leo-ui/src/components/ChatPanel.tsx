@@ -5,6 +5,7 @@ import { Mic, Send, ShieldCheck, Check, X, Volume2, VolumeX } from "lucide-react
 import LeoOrb, { LeoMood } from "./LeoOrb";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useDictation } from "@/hooks/useDictation";
+import { VoiceLang } from "@/hooks/useWakeWord";
 
 type Message = {
   id: string;
@@ -38,13 +39,13 @@ const INITIAL_MESSAGES: Message[] = [
   },
 ];
 
-export default function ChatPanel() {
+export default function ChatPanel({ voiceLang }: { voiceLang: VoiceLang }) {
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [voiceOn, setVoiceOn] = useState(true);
   const { speak, cancel, speaking } = useSpeech();
-  const dictation = useDictation();
+  const dictation = useDictation(voiceLang);
   const listening = dictation.active;
 
   const mood: LeoMood = speaking
