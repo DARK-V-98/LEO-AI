@@ -31,10 +31,18 @@ directly (checked with plain keyword/date parsing — `chrono-node` for
 dates, not the AI — so these are fast and don't cost an AI call):
 
 - **Posters**: `poster: SmartLabs AI Diploma open house, blue theme`
-  (or `flyer of ...`) — generates an image via Gemini and sends it back.
-  Needs billing enabled on the Gemini key (the free tier has zero quota
-  for image models) and `LEO_WEB_BASE_URL` set, since it calls the
+  (or `flyer of ...`, works with "posters"/"flyers" too, and natural
+  phrasing like "can you make a poster for our next intake with its
+  details") — generates an image via Gemini and sends it back. Needs
+  billing enabled on the Gemini key (the free tier has zero quota for
+  image models) and `LEO_WEB_BASE_URL` set, since it calls the
   dashboard's `/api/generate-image` route.
+  - **Reference images**: attach a photo with that caption directly
+    (send the image, with "poster: ..." as its caption), or reply to
+    an existing photo in the chat with "poster: ..." — either way, LEO
+    downloads it and passes it to Gemini as a style/branding/layout
+    reference for the new poster, verified to actually carry over
+    colors, branding and layout, not just be ignored.
 - **Reminders**: `remind me in 20 minutes to call the vendor` or
   `remind me tomorrow at 9am to send the SEO report` — LEO replies
   confirming the time, then DMs you back at that time. If no time is

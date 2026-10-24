@@ -3,6 +3,7 @@ import {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  downloadMediaMessage,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import admin from "firebase-admin";
@@ -109,20 +110,62 @@ function extractText(message) {
 // "poster: <description>" / "poster <description>" / "make a poster of..."
 const POSTER_PATTERN = /\b(?:posters?|flyers?)\b\s*(?:of|for|about)?\s*[:\-]?\s*(.+)/i;
 
-async function generatePoster(prompt) {
+async function generatePoster(prompt, referenceImage) {
   if (!WEB_BASE_URL) {
     throw new Error("LEO_WEB_BASE_URL is not set");
   }
   const res = await fetch(`${WEB_BASE_URL}/api/generate-image`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, referenceImage: referenceImage || undefined }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error || `Image generation failed (HTTP ${res.status})`);
   }
   return res.json(); // { image: base64, mimeType, model }
+}
+
+/** Looks for an image to use as a style/content reference: either the
+ * incoming message itself is a photo with a "poster: ..." caption, or it's
+ * a text reply quoting an earlier photo ("poster: use this logo" as a
+ * reply to a logo image). Returns { data: base64, mimeType } or null. */
+async function downloadReferenceImage(activeSock, msg) {
+  let mediaMessage = null;
+  let key = msg.key;
+
+  if (msg.message?.imageMessage) {
+    mediaMessage = { imageMessage: msg.message.imageMessage };
+  } else {
+    const ctx = msg.message?.extendedTextMessage?.contextInfo;
+    if (ctx?.quotedMessage?.imageMessage) {
+      mediaMessage = { imageMessage: ctx.quotedMessage.imageMessage };
+      key = {
+        remoteJid: msg.key.remoteJid,
+        id: ctx.stanzaId,
+        participant: ctx.participant,
+        fromMe: false,
+      };
+    }
+  }
+
+  if (!mediaMessage) return null;
+
+  try {
+    const buffer = await downloadMediaMessage(
+      { key, message: mediaMessage },
+      "buffer",
+      {},
+      { logger, reuploadRequest: activeSock.updateMediaMessage }
+    );
+    return {
+      data: buffer.toString("base64"),
+      mimeType: mediaMessage.imageMessage.mimetype || "image/jpeg",
+    };
+  } catch (err) {
+    console.error("Failed to download reference image:", err);
+    return null;
+  }
 }
 
 // --- Reminders ("remind me ... at/in ...") ---------------------------------
@@ -285,17 +328,20 @@ function attachMessageHandler(activeSock) {
         if (posterMatch) {
           const prompt = posterMatch[1].trim();
           try {
-            const { image, mimeType } = await generatePoster(prompt);
+            const referenceImage = await downloadReferenceImage(activeSock, msg);
+            const { image, mimeType } = await generatePoster(prompt, referenceImage);
             await activeSock.sendMessage(remoteJid, {
               image: Buffer.from(image, "base64"),
               mimetype: mimeType,
-              caption: `Here's your poster: "${prompt}"`,
+              caption: referenceImage
+                ? `Here's your poster (using your reference image): "${prompt}"`
+                : `Here's your poster: "${prompt}"`,
             });
             await db
               .collection("activity")
               .add({
                 title: "Generated a poster on WhatsApp",
-                detail: prompt.slice(0, 60),
+                detail: `${prompt.slice(0, 60)}${referenceImage ? " (with reference image)" : ""}`,
                 type: "ok",
                 createdAt: Date.now(),
               })
