@@ -156,7 +156,7 @@ export default function HomeHero({
   }
 
   async function respondToWake(command: string) {
-    onHeardCommand(command || "(wake word only)");
+    onHeardCommand(command || "(unclear speech)");
     setMood("listening");
     await delay(500);
     setMood("thinking");
@@ -271,8 +271,9 @@ export default function HomeHero({
             LEO wants microphone access
           </div>
           <p className="mb-3 text-[12px] text-muted">
-            So he can hear you say &quot;Leo&quot; and know who&apos;s talking.
-            Nothing is recorded or sent anywhere until you say his name.
+            So he can hear and respond to whatever you say, no wake word
+            needed. Nothing is recorded or sent anywhere until you turn
+            listening on.
           </p>
           <div className="flex justify-center gap-2">
             <button
@@ -326,7 +327,7 @@ export default function HomeHero({
             }`}
           >
             {enabled ? <Mic size={14} /> : <MicOff size={14} />}
-            {enabled ? "Listening for “Leo” — tap to stop" : "Tap to let LEO listen for his name"}
+            {enabled ? "Listening — tap to stop" : "Tap to let LEO listen"}
           </button>
 
           <span
@@ -336,16 +337,16 @@ export default function HomeHero({
           >
             <Ear size={11} className={enabled && !micErrorKind && !noAudioWarning ? "text-accent-green" : ""} />
             {!supported
-              ? "Voice wake isn't supported in this browser"
+              ? "Voice listening isn't supported in this browser"
               : micErrorKind
                 ? `Mic stopped (${micErrorKind}) — check your microphone, then tap to restart`
                 : noAudioWarning
                   ? "No audio detected from your mic — check this browser has OS-level mic access and the right input device is selected"
                   : wakeState === "awake"
-                  ? "Awake — go ahead"
-                  : enabled
-                    ? "Always on, say “Leo” anytime"
-                    : "Wake-word listening is off"}
+                    ? "Hearing you — go ahead"
+                    : enabled
+                      ? "Always on — just talk, no wake word needed"
+                      : "Mic listening is off"}
           </span>
 
           {enabled ? (

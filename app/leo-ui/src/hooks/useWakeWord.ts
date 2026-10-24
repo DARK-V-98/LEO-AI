@@ -10,23 +10,16 @@ export type VoiceLang = "en-US" | "si-LK";
 // while the mic had actually stopped capturing anything at all.
 const SILENT_RETRY_ERRORS = new Set(["no-speech", "aborted"]);
 
-const WAKE_PATTERN_EN = /\bhey\s+leo\b|\bleo\b/i;
-// Best-effort Sinhala phonetic spellings of "Leo" — speech recognition
-// transcribes names inconsistently, so this is approximate, not exact.
-const WAKE_PATTERN_SI = /\bලියෝ\b|\bhey\s+leo\b|\bleo\b/i;
-
 // How long to wait, after the last bit of new speech, before treating the
-// command as finished and handing it off. Without this, the hook used to
-// fire the instant it heard "Leo" — cutting "Leo, open YouTube" down to
-// just "Leo" and throwing the rest away.
+// command as finished and handing it off, so a sentence doesn't get cut
+// into pieces at every short pause.
 const COLLECT_SILENCE_MS = 1000;
 
 /**
- * Always-on "say the wake word" listener. This never calls an LLM — it's a
- * plain speech-to-text loop watching only for the word "Leo" (or "Hey Leo").
- * Only once a full command is collected (speech pauses) does anything get
- * handed to the AI layer, same as a phone's "Hey Siri" detector sitting in
- * front of the actual assistant.
+ * Always-on listener. This never calls an LLM — it's a plain speech-to-text
+ * loop that hands over whatever was said as soon as you pause, no "Leo"
+ * wake word needed once the mic toggle itself is on (that toggle is the
+ * actual consent gate — nothing is sent anywhere until it's on).
  *
  * `lang` picks the recognition language (speech recognition only supports
  * one at a time). Changing it only takes effect the next time listening is
@@ -89,7 +82,6 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = langRef.current;
-    const wakePattern = langRef.current === "si-LK" ? WAKE_PATTERN_SI : WAKE_PATTERN_EN;
 
     // Fires as soon as the browser is actually capturing audio from the
     // mic — not standardized across every engine, so this is a best-effort
@@ -114,15 +106,15 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
       }
       setLastTranscript(transcript);
 
+      const trimmed = transcript.trim();
+      if (!trimmed) return;
+
       if (!awakeRef.current) {
-        if (!wakePattern.test(transcript)) return;
         awakeRef.current = true;
         setState("awake");
       }
 
-      // Whether this is the triggering event or a continuation, strip any
-      // wake-word prefix and keep collecting until speech pauses.
-      pendingCommand.current = transcript.split(wakePattern).pop()?.trim() ?? "";
+      pendingCommand.current = trimmed;
       clearCollectTimer();
       collectTimer.current = setTimeout(finalizeCommand, COLLECT_SILENCE_MS);
     };
