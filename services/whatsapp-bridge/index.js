@@ -107,7 +107,7 @@ function extractText(message) {
 }
 
 // "poster: <description>" / "poster <description>" / "make a poster of..."
-const POSTER_PATTERN = /\b(?:poster|flyer)\b\s*(?:of|for|about)?\s*[:\-]?\s*(.+)/i;
+const POSTER_PATTERN = /\b(?:posters?|flyers?)\b\s*(?:of|for|about)?\s*[:\-]?\s*(.+)/i;
 
 async function generatePoster(prompt) {
   if (!WEB_BASE_URL) {
