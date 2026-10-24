@@ -37,6 +37,12 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
   const [enabled, setEnabled] = useState(false);
   const [lastTranscript, setLastTranscript] = useState("");
   const [micErrorKind, setMicErrorKind] = useState<string | null>(null);
+  // True once the browser confirms audio is actually flowing in from the
+  // mic — separate from `enabled`/`state`, which only reflect that
+  // recognition.start() was *called*, not that any sound is reaching it.
+  // This is what tells "the toggle is on but he genuinely can't hear me"
+  // apart from "a wake word just hasn't been said yet".
+  const [audioActive, setAudioActive] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const awakeRef = useRef(false);
   const collectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,6 +74,7 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
     awakeRef.current = false;
     setState("idle");
     setMicErrorKind(null);
+    setAudioActive(false);
   }, []);
 
   const start = useCallback(() => {
@@ -76,12 +83,21 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
       return;
     }
     setMicErrorKind(null);
+    setAudioActive(false);
     const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition!;
     const recognition = new Ctor();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = langRef.current;
     const wakePattern = langRef.current === "si-LK" ? WAKE_PATTERN_SI : WAKE_PATTERN_EN;
+
+    // Fires as soon as the browser is actually capturing audio from the
+    // mic — not standardized across every engine, so this is a best-effort
+    // signal, but Chrome/Edge (the browsers this actually works in) fire it
+    // reliably.
+    recognition.onaudiostart = () => {
+      setAudioActive(true);
+    };
 
     const finalizeCommand = () => {
       const command = pendingCommand.current;
@@ -188,5 +204,5 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
-  return { state, enabled, toggle, pause, resume, lastTranscript, supported, micErrorKind };
+  return { state, enabled, toggle, pause, resume, lastTranscript, supported, micErrorKind, audioActive };
 }

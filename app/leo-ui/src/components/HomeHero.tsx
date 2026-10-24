@@ -104,7 +104,22 @@ export default function HomeHero({
     supported,
     lastTranscript,
     micErrorKind,
+    audioActive,
   } = useWakeWord((command) => respondRef.current(command), voiceLang);
+
+  // If it's been "listening" for a few seconds and the browser has never
+  // once confirmed audio is actually coming in, nothing we show elsewhere
+  // (no error, no transcript) tells the user why he's not responding — so
+  // say so directly instead of leaving it looking like it's working.
+  const [noAudioWarning, setNoAudioWarning] = useState(false);
+  useEffect(() => {
+    if (!enabled || audioActive) {
+      setNoAudioWarning(false);
+      return;
+    }
+    const id = setTimeout(() => setNoAudioWarning(true), 5000);
+    return () => clearTimeout(id);
+  }, [enabled, audioActive]);
 
   async function identifySpeaker(): Promise<string | undefined> {
     if (profiles.length === 0) return undefined;
@@ -316,15 +331,17 @@ export default function HomeHero({
 
           <span
             className={`flex items-center gap-1 font-mono text-[10px] ${
-              micErrorKind ? "text-accent-magenta" : "text-muted"
+              micErrorKind || noAudioWarning ? "text-accent-magenta" : "text-muted"
             }`}
           >
-            <Ear size={11} className={enabled && !micErrorKind ? "text-accent-green" : ""} />
+            <Ear size={11} className={enabled && !micErrorKind && !noAudioWarning ? "text-accent-green" : ""} />
             {!supported
               ? "Voice wake isn't supported in this browser"
               : micErrorKind
                 ? `Mic stopped (${micErrorKind}) — check your microphone, then tap to restart`
-                : wakeState === "awake"
+                : noAudioWarning
+                  ? "No audio detected from your mic — check this browser has OS-level mic access and the right input device is selected"
+                  : wakeState === "awake"
                   ? "Awake — go ahead"
                   : enabled
                     ? "Always on, say “Leo” anytime"
