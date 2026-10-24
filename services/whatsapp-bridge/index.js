@@ -9,6 +9,7 @@ import admin from "firebase-admin";
 import pino from "pino";
 import QRCode from "qrcode";
 import fs from "fs";
+import * as chrono from "chrono-node";
 
 // --- Firebase Admin ------------------------------------------------------
 // Paste the full service account JSON (Firebase console -> Project
@@ -34,6 +35,7 @@ const { FieldValue } = admin.firestore;
 const STATUS_DOC = db.collection("whatsapp").doc("status");
 const COMMANDS = db.collection("whatsappCommands");
 const OUTBOX = db.collection("whatsappOutbox");
+const SCHEDULED = db.collection("scheduledMessages");
 
 const AUTH_DIR = process.env.AUTH_DIR || "./auth_info";
 const logger = pino({ level: process.env.LOG_LEVEL || "warn" });
@@ -104,6 +106,155 @@ function extractText(message) {
   ).trim();
 }
 
+// "poster: <description>" / "poster <description>" / "make a poster of..."
+const POSTER_PATTERN = /\b(?:poster|flyer)\b\s*(?:of|for|about)?\s*[:\-]?\s*(.+)/i;
+
+async function generatePoster(prompt) {
+  if (!WEB_BASE_URL) {
+    throw new Error("LEO_WEB_BASE_URL is not set");
+  }
+  const res = await fetch(`${WEB_BASE_URL}/api/generate-image`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `Image generation failed (HTTP ${res.status})`);
+  }
+  return res.json(); // { image: base64, mimeType, model }
+}
+
+// --- Reminders ("remind me ... at/in ...") ---------------------------------
+function parseReminder(text) {
+  if (!/\bremind me\b/i.test(text)) return null;
+
+  const results = chrono.parse(text, new Date());
+  if (results.length === 0) return null; // no time found — caller asks for one
+
+  const match = results[0];
+  const due = match.start.date();
+  let note = (text.slice(0, match.index) + text.slice(match.index + match.text.length)).trim();
+  note = note
+    .replace(/\bremind me\b/i, "")
+    .replace(/^(to|that|about)\b\s*/i, "")
+    .replace(/^[,:\-]\s*/, "")
+    .replace(/[,:\-]\s*$/, "")
+    .trim();
+  return { due, note: note || "this" };
+}
+
+// --- Named-group messages ("tell/message/send group <name>: <message>") ---
+const GROUP_SEND_PATTERN =
+  /\b(?:tell|message|send(?:\s+to)?|notify)\s+(?:the\s+)?group\s+([^:,]+?)\s*(?:that\s+)?[:,]\s*(.+)/i;
+
+function parseGroupSend(text) {
+  const m = text.match(GROUP_SEND_PATTERN);
+  if (!m) return null;
+
+  const groupNameRaw = m[1].trim();
+  let message = m[2].trim();
+  let due = null;
+
+  const timeResults = chrono.parse(message, new Date());
+  if (timeResults.length > 0) {
+    const tm = timeResults[0];
+    due = tm.start.date();
+    message = (message.slice(0, tm.index) + message.slice(tm.index + tm.text.length)).trim();
+    message = message
+      .replace(/^(at|on)\b\s*/i, "")
+      .replace(/^[,:\-]\s*/, "")
+      .replace(/[,:\-]\s*$/, "")
+      .trim();
+  }
+
+  return { groupNameRaw, message: message || groupNameRaw, due };
+}
+
+// Cache of group name -> jid, since listing groups is a real WhatsApp call.
+let groupCache = { fetchedAt: 0, byName: new Map() };
+const GROUP_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function getGroupsByName(activeSock) {
+  if (Date.now() - groupCache.fetchedAt < GROUP_CACHE_TTL_MS && groupCache.byName.size > 0) {
+    return groupCache.byName;
+  }
+  const groups = await activeSock.groupFetchAllParticipating();
+  const byName = new Map();
+  for (const jid of Object.keys(groups)) {
+    const subject = groups[jid]?.subject;
+    if (subject) byName.set(subject.toLowerCase(), jid);
+  }
+  groupCache = { fetchedAt: Date.now(), byName };
+  return byName;
+}
+
+async function resolveGroup(activeSock, nameQuery) {
+  const byName = await getGroupsByName(activeSock);
+  const q = nameQuery.trim().toLowerCase();
+  if (byName.has(q)) return { jid: byName.get(q), name: nameQuery.trim() };
+  for (const [name, jid] of byName.entries()) {
+    if (name.includes(q) || q.includes(name)) return { jid, name };
+  }
+  return null;
+}
+
+async function scheduleMessage({ type, targetJid, targetLabel, message, dueAt, createdBy }) {
+  await SCHEDULED.add({
+    type,
+    targetJid,
+    targetLabel,
+    message,
+    dueAt,
+    createdBy,
+    sent: false,
+    createdAt: Date.now(),
+  });
+}
+
+function formatDue(date) {
+  return date.toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/** Runs on an interval: sends anything in scheduledMessages whose time has
+ * come. Deliberately checks `sent` only and filters the due time in JS
+ * rather than in the Firestore query, to avoid needing a composite index. */
+async function runScheduler() {
+  if (!sock || socketState !== "open") return;
+  const now = Date.now();
+  try {
+    const snap = await SCHEDULED.where("sent", "==", false).get();
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      if (!data.dueAt || data.dueAt > now) continue;
+      try {
+        const prefix = data.type === "reminder" ? "⏰ Reminder: " : "";
+        await sock.sendMessage(data.targetJid, { text: `${prefix}${data.message}` });
+        await doc.ref.update({ sent: true, sentAt: Date.now() });
+        await db
+          .collection("activity")
+          .add({
+            title: data.type === "reminder" ? "Sent a reminder" : "Sent a scheduled group message",
+            detail: `${data.targetLabel}: "${data.message.slice(0, 60)}"`,
+            type: "ok",
+            createdAt: Date.now(),
+          })
+          .catch(() => {});
+      } catch (err) {
+        console.error("Failed to send a scheduled message:", err);
+      }
+    }
+  } catch (err) {
+    console.error("Scheduler check failed:", err);
+  }
+}
+
 function attachMessageHandler(activeSock) {
   activeSock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
@@ -121,21 +272,105 @@ function attachMessageHandler(activeSock) {
         if (isGroup && !MENTION_PATTERN.test(text)) continue;
 
         const askText = isGroup ? text.replace(MENTION_PATTERN, "").trim() || text : text;
+        // Reminders are personal — if said inside a group, reply to the
+        // person who asked, not the whole group.
+        const senderJid = isGroup ? msg.key.participant || remoteJid : remoteJid;
 
         await activeSock.sendPresenceUpdate("composing", remoteJid).catch(() => {});
-        const reply = await askLeo(remoteJid, askText);
-        await activeSock.sendMessage(remoteJid, { text: reply });
-        await activeSock.sendPresenceUpdate("paused", remoteJid).catch(() => {});
 
-        await db
-          .collection("activity")
-          .add({
-            title: "Replied on WhatsApp",
-            detail: isGroup ? `Group message: "${askText.slice(0, 60)}"` : `DM: "${askText.slice(0, 60)}"`,
-            type: "ok",
-            createdAt: Date.now(),
-          })
-          .catch(() => {});
+        const posterMatch = askText.match(POSTER_PATTERN);
+        const reminder = parseReminder(askText);
+        const groupSend = !reminder ? parseGroupSend(askText) : null;
+
+        if (posterMatch) {
+          const prompt = posterMatch[1].trim();
+          try {
+            const { image, mimeType } = await generatePoster(prompt);
+            await activeSock.sendMessage(remoteJid, {
+              image: Buffer.from(image, "base64"),
+              mimetype: mimeType,
+              caption: `Here's your poster: "${prompt}"`,
+            });
+            await db
+              .collection("activity")
+              .add({
+                title: "Generated a poster on WhatsApp",
+                detail: prompt.slice(0, 60),
+                type: "ok",
+                createdAt: Date.now(),
+              })
+              .catch(() => {});
+          } catch (err) {
+            await activeSock.sendMessage(remoteJid, {
+              text: `Couldn't generate that poster — ${err.message || "try again shortly"}.`,
+            });
+          }
+        } else if (/\bremind me\b/i.test(askText) && !reminder) {
+          // They said "remind me" but no time was understood.
+          await activeSock.sendMessage(remoteJid, {
+            text: 'What time should I remind you? e.g. "remind me in 20 minutes to call the vendor" or "remind me tomorrow at 9am to send the report".',
+          });
+        } else if (reminder) {
+          const dueAt = reminder.due.getTime();
+          await scheduleMessage({
+            type: "reminder",
+            targetJid: senderJid,
+            targetLabel: "you",
+            message: reminder.note,
+            dueAt,
+            createdBy: senderJid,
+          });
+          await activeSock.sendMessage(remoteJid, {
+            text: `Got it — I'll remind you about "${reminder.note}" on ${formatDue(reminder.due)}.`,
+          });
+        } else if (groupSend) {
+          const group = await resolveGroup(activeSock, groupSend.groupNameRaw).catch(() => null);
+          if (!group) {
+            await activeSock.sendMessage(remoteJid, {
+              text: `I couldn't find a group called "${groupSend.groupNameRaw}" that I'm a member of.`,
+            });
+          } else if (groupSend.due) {
+            await scheduleMessage({
+              type: "group",
+              targetJid: group.jid,
+              targetLabel: group.name,
+              message: groupSend.message,
+              dueAt: groupSend.due.getTime(),
+              createdBy: senderJid,
+            });
+            await activeSock.sendMessage(remoteJid, {
+              text: `Scheduled — I'll message "${group.name}" on ${formatDue(groupSend.due)}.`,
+            });
+          } else {
+            await activeSock.sendMessage(group.jid, { text: groupSend.message });
+            await activeSock.sendMessage(remoteJid, {
+              text: `Sent to "${group.name}".`,
+            });
+            await db
+              .collection("activity")
+              .add({
+                title: "Sent a message to a group",
+                detail: `${group.name}: "${groupSend.message.slice(0, 60)}"`,
+                type: "ok",
+                createdAt: Date.now(),
+              })
+              .catch(() => {});
+          }
+        } else {
+          const reply = await askLeo(remoteJid, askText);
+          await activeSock.sendMessage(remoteJid, { text: reply });
+          await db
+            .collection("activity")
+            .add({
+              title: "Replied on WhatsApp",
+              detail: isGroup ? `Group message: "${askText.slice(0, 60)}"` : `DM: "${askText.slice(0, 60)}"`,
+              type: "ok",
+              createdAt: Date.now(),
+            })
+            .catch(() => {});
+        }
+
+        await activeSock.sendPresenceUpdate("paused", remoteJid).catch(() => {});
       } catch (err) {
         console.error("Failed to handle an incoming WhatsApp message:", err);
       }
@@ -297,5 +532,9 @@ console.log("LEO WhatsApp bridge is up. Waiting for a link request from the dash
 if (fs.existsSync(AUTH_DIR) && fs.readdirSync(AUTH_DIR).length > 0) {
   startSock();
 }
+
+// Reminders and scheduled group messages — checked frequently enough that
+// "remind me in 5 minutes" is actually useful, not just daily digests.
+setInterval(runScheduler, 20_000);
 
 process.on("SIGTERM", () => process.exit(0));

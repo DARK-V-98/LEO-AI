@@ -14,7 +14,12 @@ const SYSTEM_PROMPT =
   "Sinhala script, not transliterated or translated to English; if they " +
   "use English, reply in English. Keep Sinhala replies natural and " +
   "conversational, the way a Sri Lankan colleague would actually speak, " +
-  "not a stiff literal translation.";
+  "not a stiff literal translation. You cannot generate images yourself " +
+  "in this chat, but on WhatsApp you can: if asked (here or on WhatsApp) " +
+  "to make a poster, flyer, or image, tell them to message you on " +
+  "WhatsApp with 'poster: <description>' (e.g. 'poster: SmartLabs AI " +
+  "Diploma open house, blue theme') and it will be generated and sent " +
+  "back automatically — don't just say you can't do it.";
 
 // Free-tier OpenRouter models, tried in order until one responds.
 const OPENROUTER_MODELS = [

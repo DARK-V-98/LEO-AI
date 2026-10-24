@@ -24,6 +24,35 @@ It uses [Baileys](https://github.com/WhiskeySockets/Baileys), the
 unofficial WhatsApp Web multi-device protocol library — no headless
 browser needed, just a WebSocket connection, so it's cheap to run.
 
+## What you can say to LEO on WhatsApp
+
+Beyond ordinary chat, a few message patterns are recognized and acted on
+directly (checked with plain keyword/date parsing — `chrono-node` for
+dates, not the AI — so these are fast and don't cost an AI call):
+
+- **Posters**: `poster: SmartLabs AI Diploma open house, blue theme`
+  (or `flyer of ...`) — generates an image via Gemini and sends it back.
+  Needs billing enabled on the Gemini key (the free tier has zero quota
+  for image models) and `LEO_WEB_BASE_URL` set, since it calls the
+  dashboard's `/api/generate-image` route.
+- **Reminders**: `remind me in 20 minutes to call the vendor` or
+  `remind me tomorrow at 9am to send the SEO report` — LEO replies
+  confirming the time, then DMs you back at that time. If no time is
+  understood, he'll ask for one instead of silently doing nothing.
+- **Scheduled/targeted group messages**: `tell group Marketing Team: the
+  meeting moved to 3pm` sends immediately; adding a time —
+  `tell group Ops tomorrow at 9am: deploy window starts` — schedules it
+  for then instead. LEO only matches against groups he's actually a
+  member of; if the name doesn't match, he says so rather than guessing.
+
+These are checked in this order: poster, then reminder, then group-send,
+then falls through to a normal AI chat reply — so a message needs to
+clearly match one of the patterns above to trigger it instead of just
+being answered conversationally. Reminders and scheduled group messages
+are stored in Firestore (`scheduledMessages`) and a 20-second-interval
+check inside this same worker sends them once due — no separate cron job
+needed.
+
 ## 1. Get a Firebase service account key
 
 This is different from the public web config already used by the
