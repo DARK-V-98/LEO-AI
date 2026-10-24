@@ -20,6 +20,7 @@ import {
   WhatsAppStatus,
 } from "@/lib/whatsapp";
 import { firebaseEnabled } from "@/lib/firebase";
+import WhatsAppChatsPanel from "./WhatsAppChatsPanel";
 
 type ProviderStatus = { ok: boolean; message: string; detail?: string };
 type ProviderStatusResponse = {
@@ -230,6 +231,10 @@ export default function AdminPanel() {
             </p>
           </div>
         )}
+      </div>
+
+      <div className="min-h-[320px] flex-1">
+        <WhatsAppChatsPanel />
       </div>
     </div>
   );

@@ -79,7 +79,7 @@ function chatMessagesRef(jid) {
 }
 
 const chatMemory = new Map();
-const HISTORY_FOR_AI = 12; // how much recent context to actually send the model
+const HISTORY_FOR_AI = 20; // how much recent context to actually send the model
 
 function remember(jid, role, content) {
   const history = chatMemory.get(jid) ?? [];
@@ -90,6 +90,24 @@ function remember(jid, role, content) {
   chatMessagesRef(jid)
     .add({ role, content, createdAt: Date.now() })
     .catch((err) => console.error(`Failed to persist message for ${jid}:`, err));
+
+  // Keeps a lightweight, queryable list of "which chats exist" for the
+  // admin dashboard — without this, whatsappChats/{jid} documents would
+  // only exist as a path implied by their messages subcollection, which
+  // Firestore can't list directly.
+  db.collection("whatsappChats")
+    .doc(jid)
+    .set(
+      {
+        jid,
+        isGroup: jid.endsWith("@g.us"),
+        lastMessageAt: Date.now(),
+        lastMessageText: content.slice(0, 120),
+        lastMessageRole: role,
+      },
+      { merge: true }
+    )
+    .catch((err) => console.error(`Failed to update chat summary for ${jid}:`, err));
 }
 
 /** On the first message from a JID since this process started, pull its
@@ -210,7 +228,7 @@ const HELP_TEXT = [
   "In the company group, say “Leo” so I know you're talking to me.",
 ].join("\n");
 
-async function askLeo(jid) {
+async function askLeo(jid, attachment) {
   if (!WEB_BASE_URL) {
     return "I'm not fully set up to chat here yet — ask the team to finish the WhatsApp setup (LEO_WEB_BASE_URL).";
   }
@@ -219,7 +237,11 @@ async function askLeo(jid) {
     const res = await fetch(`${WEB_BASE_URL}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ history: chatMemory.get(jid), context }),
+      body: JSON.stringify({
+        history: chatMemory.get(jid),
+        context,
+        attachments: attachment ? [{ data: attachment.data, mimeType: attachment.mimeType }] : undefined,
+      }),
     });
     const data = await res.json();
     const reply = data?.reply || "Sorry, I didn't catch that — could you say it again?";
@@ -264,22 +286,38 @@ async function generatePoster(prompt, referenceImage) {
  * incoming message itself is a photo with a "poster: ..." caption, or it's
  * a text reply quoting an earlier photo ("poster: use this logo" as a
  * reply to a logo image). Returns { data: base64, mimeType } or null. */
-async function downloadReferenceImage(activeSock, msg) {
+/** Finds an image or voice/audio message to work with, whether it's the
+ * message itself (a photo with a "poster: ..." caption, a voice note sent
+ * directly) or it's a text reply quoting an earlier one ("Leo, what does
+ * this say" as a reply to a photo or voice note someone sent earlier).
+ * Returns { data: base64, mimeType, kind: 'image' | 'audio' } or null. */
+async function getAttachment(activeSock, msg) {
   let mediaMessage = null;
+  let kind = null;
   let key = msg.key;
 
   if (msg.message?.imageMessage) {
     mediaMessage = { imageMessage: msg.message.imageMessage };
+    kind = "image";
+  } else if (msg.message?.audioMessage) {
+    mediaMessage = { audioMessage: msg.message.audioMessage };
+    kind = "audio";
   } else {
     const ctx = msg.message?.extendedTextMessage?.contextInfo;
+    const quotedKey = {
+      remoteJid: msg.key.remoteJid,
+      id: ctx?.stanzaId,
+      participant: ctx?.participant,
+      fromMe: false,
+    };
     if (ctx?.quotedMessage?.imageMessage) {
       mediaMessage = { imageMessage: ctx.quotedMessage.imageMessage };
-      key = {
-        remoteJid: msg.key.remoteJid,
-        id: ctx.stanzaId,
-        participant: ctx.participant,
-        fromMe: false,
-      };
+      kind = "image";
+      key = quotedKey;
+    } else if (ctx?.quotedMessage?.audioMessage) {
+      mediaMessage = { audioMessage: ctx.quotedMessage.audioMessage };
+      kind = "audio";
+      key = quotedKey;
     }
   }
 
@@ -292,12 +330,14 @@ async function downloadReferenceImage(activeSock, msg) {
       {},
       { logger, reuploadRequest: activeSock.updateMediaMessage }
     );
+    const inner = mediaMessage.imageMessage || mediaMessage.audioMessage;
     return {
       data: buffer.toString("base64"),
-      mimeType: mediaMessage.imageMessage.mimetype || "image/jpeg",
+      mimeType: inner.mimetype || (kind === "image" ? "image/jpeg" : "audio/ogg"),
+      kind,
     };
   } catch (err) {
-    console.error("Failed to download reference image:", err);
+    console.error(`Failed to download ${kind ?? "media"}:`, err);
     return null;
   }
 }
@@ -442,36 +482,32 @@ async function runScheduler() {
   }
 }
 
-function attachMessageHandler(activeSock) {
-  activeSock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return;
+// How long to wait after the last message in a chat before actually
+// processing it. Without this, someone typing a thought across several
+// quick messages ("remind me" / "in 10 minutes" / "to call the vendor")
+// got handled as three separate, disconnected turns — exactly the
+// "confused, answers the wrong thing" symptom this fixes. Each buffered
+// message is joined with a newline and treated as one combined turn, run
+// through the same dispatch logic (and the same last-20-messages
+// context) as a single message would be.
+const TURN_DEBOUNCE_MS = 3000;
+const pendingTurns = new Map(); // remoteJid -> { parts, senderJid, isGroup, representativeMsg, timer }
 
-    for (const msg of messages) {
-      try {
-        const remoteJid = msg.key.remoteJid;
-        if (!remoteJid || remoteJid === "status@broadcast") continue;
-        if (msg.key.fromMe) continue; // don't reply to LEO's own messages
+async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText, msg }) {
+  try {
+    const attachment = msg ? await getAttachment(activeSock, msg) : null;
 
-        const text = extractText(msg.message);
-        if (!text) continue;
+    // Every message gets permanently saved here, once, regardless of
+    // which branch below ends up handling it — not just AI replies. A
+    // bare photo/voice note with no text gets a readable placeholder
+    // instead of an empty history entry.
+    await ensureHistoryLoaded(remoteJid);
+    const historyText =
+      askText || (attachment ? (attachment.kind === "image" ? "[image]" : "[voice message]") : "");
+    remember(remoteJid, "user", historyText);
 
-        const isGroup = remoteJid.endsWith("@g.us");
-        if (isGroup && !MENTION_PATTERN.test(text)) continue;
-
-        const askText = isGroup ? text.replace(MENTION_PATTERN, "").trim() || text : text;
-        // Reminders are personal — if said inside a group, reply to the
-        // person who asked, not the whole group.
-        const senderJid = isGroup ? msg.key.participant || remoteJid : remoteJid;
-
-        await activeSock.sendPresenceUpdate("composing", remoteJid).catch(() => {});
-
-        // Every message gets permanently saved here, once, regardless of
-        // which branch below ends up handling it — not just AI replies.
-        await ensureHistoryLoaded(remoteJid);
-        remember(remoteJid, "user", askText);
-
-        // Learn who's speaking, silently — never changes what gets replied.
-        maybeLearnIntroduction(senderJid, askText).catch(() => {});
+    // Learn who's speaking, silently — never changes what gets replied.
+    maybeLearnIntroduction(senderJid, askText).catch(() => {});
 
         const rememberMatch = askText.match(REMEMBER_PATTERN);
         const posterMatch = !rememberMatch ? askText.match(POSTER_PATTERN) : null;
@@ -499,7 +535,7 @@ function attachMessageHandler(activeSock) {
         } else if (posterMatch) {
           const prompt = posterMatch[1].trim();
           try {
-            const referenceImage = await downloadReferenceImage(activeSock, msg);
+            const referenceImage = attachment?.kind === "image" ? attachment : null;
             const { image, mimeType } = await generatePoster(prompt, referenceImage);
             const caption = referenceImage
               ? `Here's your poster (using your reference image): "${prompt}"`
@@ -603,22 +639,85 @@ function attachMessageHandler(activeSock) {
             remember(remoteJid, "assistant", errText);
           }
         } else {
-          const reply = await askLeo(remoteJid);
+          const reply = await askLeo(remoteJid, attachment);
           await activeSock.sendMessage(remoteJid, { text: reply });
           await db
             .collection("activity")
             .add({
-              title: "Replied on WhatsApp",
-              detail: isGroup ? `Group message: "${askText.slice(0, 60)}"` : `DM: "${askText.slice(0, 60)}"`,
+              title: attachment
+                ? `Read a${attachment.kind === "image" ? "n image" : " voice message"} on WhatsApp`
+                : "Replied on WhatsApp",
+              detail: isGroup ? `Group message: "${historyText.slice(0, 60)}"` : `DM: "${historyText.slice(0, 60)}"`,
               type: "ok",
               createdAt: Date.now(),
             })
             .catch(() => {});
         }
 
-        await activeSock.sendPresenceUpdate("paused", remoteJid).catch(() => {});
+    await activeSock.sendPresenceUpdate("paused", remoteJid).catch(() => {});
+  } catch (err) {
+    console.error("Failed to handle an incoming WhatsApp message:", err);
+  }
+}
+
+function attachMessageHandler(activeSock) {
+  activeSock.ev.on("messages.upsert", async ({ messages, type }) => {
+    if (type !== "notify") return;
+
+    for (const msg of messages) {
+      try {
+        const remoteJid = msg.key.remoteJid;
+        if (!remoteJid || remoteJid === "status@broadcast") continue;
+        if (msg.key.fromMe) continue; // don't reply to LEO's own messages
+
+        const text = extractText(msg.message);
+        const hasImage = Boolean(msg.message?.imageMessage);
+        const hasAudio = Boolean(msg.message?.audioMessage);
+        const hasMedia = hasImage || hasAudio;
+        if (!text && !hasMedia) continue;
+
+        const isGroup = remoteJid.endsWith("@g.us");
+        // In a group, a bare photo/voice note with no mention at all isn't
+        // meant for LEO — he only joins in when actually addressed, either
+        // as this message's own caption or (resolved later, via the quoted
+        // message) as a reply to a piece of media: "Leo, what does this say".
+        if (isGroup && !MENTION_PATTERN.test(text || "")) continue;
+
+        const askText = isGroup && text ? text.replace(MENTION_PATTERN, "").trim() || text : text;
+        // Reminders are personal — if said inside a group, reply to the
+        // person who asked, not the whole group.
+        const senderJid = isGroup ? msg.key.participant || remoteJid : remoteJid;
+
+        await activeSock.sendPresenceUpdate("composing", remoteJid).catch(() => {});
+
+        let entry = pendingTurns.get(remoteJid);
+        if (!entry) {
+          entry = { parts: [], senderJid, isGroup, representativeMsg: msg, timer: null };
+          pendingTurns.set(remoteJid, entry);
+        }
+        if (askText) entry.parts.push(askText);
+        // Prefer a message that actually carries (or quotes) media over a
+        // plain text one, so poster/vision/voice lookups find it.
+        const quotedCtx = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        if (hasMedia || quotedCtx?.imageMessage || quotedCtx?.audioMessage) {
+          entry.representativeMsg = msg;
+        }
+
+        if (entry.timer) clearTimeout(entry.timer);
+        entry.timer = setTimeout(() => {
+          pendingTurns.delete(remoteJid);
+          const combinedText = entry.parts.join("\n").trim();
+          if (!combinedText && !entry.representativeMsg) return;
+          processTurn(activeSock, {
+            remoteJid,
+            senderJid: entry.senderJid,
+            isGroup: entry.isGroup,
+            askText: combinedText,
+            msg: entry.representativeMsg,
+          }).catch((err) => console.error("Failed to process a WhatsApp turn:", err));
+        }, TURN_DEBOUNCE_MS);
       } catch (err) {
-        console.error("Failed to handle an incoming WhatsApp message:", err);
+        console.error("Failed to buffer an incoming WhatsApp message:", err);
       }
     }
   });

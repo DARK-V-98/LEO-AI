@@ -81,5 +81,18 @@ service cloud.firestore {
       allow create: if isDeveloper();
       allow update, delete: if false;
     }
+
+    // Every WhatsApp DM and group chat LEO is part of — real people's
+    // conversations, so this is developer-only, not just any signed-in
+    // staff member. Written only by the bridge worker (Admin SDK).
+    match /whatsappChats/{chatId} {
+      allow read: if isDeveloper();
+      allow write: if false;
+
+      match /messages/{id} {
+        allow read: if isDeveloper();
+        allow write: if false;
+      }
+    }
   }
 }

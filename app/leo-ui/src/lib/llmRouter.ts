@@ -3,6 +3,7 @@
 // /api/chat, and never learns which provider actually answered.
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+export type Attachment = { data: string; mimeType: string };
 
 const SYSTEM_PROMPT =
   "You are LEO, the always-on AI operator for SmartLabs. You help staff with " +
@@ -57,16 +58,27 @@ async function tryOpenRouter(messages: ChatMessage[]): Promise<string | null> {
   return null;
 }
 
-async function tryGemini(messages: ChatMessage[]): Promise<string | null> {
+async function tryGemini(
+  messages: ChatMessage[],
+  attachments?: Attachment[]
+): Promise<string | null> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
 
-  const contents = messages
-    .filter((m) => m.role !== "system")
-    .map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
+  const nonSystem = messages.filter((m) => m.role !== "system");
+  const contents = nonSystem.map((m, i) => {
+    const isLast = i === nonSystem.length - 1;
+    const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
+    // Attachments (an image or voice message) apply to the current turn —
+    // the last message in the history — not the whole conversation.
+    if (isLast && attachments?.length) {
+      for (const a of attachments) {
+        parts.push({ inlineData: { mimeType: a.mimeType, data: a.data } });
+      }
+    }
+    parts.push({ text: m.content || "(see attached)" });
+    return { role: m.role === "assistant" ? "model" : "user", parts };
+  });
   const system = messages.find((m) => m.role === "system")?.content;
 
   // Ordered by reliability we've observed, not just capability — the
@@ -110,7 +122,11 @@ const SINHALA_PATTERN = /[඀-෿]/;
  * generic offline reply so the chat never just breaks. For Sinhala, Gemini
  * goes first instead — the free OpenRouter models are noticeably weaker at
  * it than Gemini is. */
-export async function generateReply(history: ChatMessage[], context?: string): Promise<string> {
+export async function generateReply(
+  history: ChatMessage[],
+  context?: string,
+  attachments?: Attachment[]
+): Promise<string> {
   const systemContent = context?.trim()
     ? `${SYSTEM_PROMPT}\n\n${context.trim()}`
     : SYSTEM_PROMPT;
@@ -118,6 +134,14 @@ export async function generateReply(history: ChatMessage[], context?: string): P
     { role: "system", content: systemContent },
     ...history,
   ];
+
+  // Image/audio understanding needs a provider actually verified to support
+  // it — go straight to Gemini rather than trying free OpenRouter models
+  // first, most of which don't handle multimodal input reliably.
+  if (attachments && attachments.length > 0) {
+    const fromGemini = await tryGemini(messages, attachments);
+    return fromGemini ?? "I couldn't process that image/voice message right now — try again shortly.";
+  }
 
   const lastUserMessage = [...history].reverse().find((m) => m.role === "user");
   const isSinhala = lastUserMessage ? SINHALA_PATTERN.test(lastUserMessage.content) : false;

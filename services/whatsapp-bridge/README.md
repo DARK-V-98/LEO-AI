@@ -52,6 +52,16 @@ dates, not the AI — so these are fast and don't cost an AI call):
   `tell group Ops tomorrow at 9am: deploy window starts` — schedules it
   for then instead. LEO only matches against groups he's actually a
   member of; if the name doesn't match, he says so rather than guessing.
+- **Voice messages and images** (DMs always, groups when addressed) — send
+  a voice note and he transcribes + responds to what was said; send a
+  photo (of a document, whiteboard, anything) and he reads/describes it.
+  Works as a reply too: send a photo or voice note with no mention at
+  all, then later reply to it with "Leo, what does this say?" — he
+  resolves the quoted media and answers about that, not the reply text
+  alone. In a group, a bare photo/voice note with no "Leo" mention is
+  left alone entirely — he only engages when actually addressed, in that
+  message or in a reply to it. Verified end-to-end against the real
+  Gemini API for both image and audio input before shipping.
 
 - **Every message is saved** — every DM and group message either side
   sends is permanently stored in Firestore (`whatsappChats/{chatJid}/
@@ -91,6 +101,20 @@ just being answered conversationally. Reminders and scheduled group
 messages are stored in Firestore (`scheduledMessages`) and a
 20-second-interval check inside this same worker sends them once due —
 no separate cron job needed.
+
+**Rapid-fire messages get combined, not confused.** If several messages
+arrive in the same chat within 3 seconds of each other — someone typing
+a thought across a few lines, or "remind me" / "in 10 minutes" / "to
+call the vendor" sent as three separate messages — they're joined into
+one combined turn before any of the matching above runs, instead of each
+one being treated as a separate, disconnected message. Context sent to
+the AI covers the last 20 messages in that chat (not just the current
+one), so follow-up questions and multi-part requests hold together.
+
+**Viewing chats on the dashboard**: every DM and group chat is visible
+on the website's Admin tab (`whatsappChats` in Firestore) — restricted
+to the developer role only (see `firestore.rules`), since this is real
+people's conversations, not general company data.
 
 ## 1. Get a Firebase service account key
 
