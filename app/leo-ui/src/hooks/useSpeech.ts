@@ -25,13 +25,17 @@ export function useSpeech() {
     if (!supported) return null;
     if (voiceRef.current) return voiceRef.current;
     const voices = window.speechSynthesis.getVoices();
+    // Only ever pick from English voices — never fall back to voices[0],
+    // which can silently be a different language/accent and is what was
+    // making LEO's speech sound wrong.
+    const english = voices.filter((v) => v.lang.toLowerCase().startsWith("en"));
     const preferred =
-      voices.find((v) =>
-        /Google US English|Google UK English|Natural|Daniel|Matthew|Aria/i.test(
+      english.find((v) =>
+        /Google US English|Google UK English|Natural|Daniel|Matthew|Aria|Samantha/i.test(
           v.name
         )
-      ) ?? voices.find((v) => v.lang.startsWith("en"));
-    voiceRef.current = preferred ?? voices[0] ?? null;
+      ) ?? english[0];
+    voiceRef.current = preferred ?? null;
     return voiceRef.current;
   }, [supported]);
 
@@ -44,6 +48,7 @@ export function useSpeech() {
         }
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(text);
+        utter.lang = "en-US";
         const voice = pickVoice();
         if (voice) utter.voice = voice;
         utter.rate = 1.03;

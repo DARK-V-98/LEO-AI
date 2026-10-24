@@ -22,6 +22,7 @@ export function useWakeWord(onWake: (commandSoFar: string) => void) {
   const onWakeRef = useRef(onWake);
   onWakeRef.current = onWake;
   const enabledRef = useRef(false);
+  const pausedRef = useRef(false);
 
   const supported =
     typeof window !== "undefined" &&
@@ -87,10 +88,13 @@ export function useWakeWord(onWake: (commandSoFar: string) => void) {
 
     recognition.onend = () => {
       // continuous mode can still be cut off by the browser — restart
-      // automatically while the user has it switched on. Reads the ref
-      // (not the closed-over `enabled`) so a stop() that happened after
-      // this listener was created is still respected.
-      if (enabledRef.current) {
+      // automatically while the user has it switched on. Reads the refs
+      // (not closed-over values) so a stop()/pause() that happened after
+      // this listener was created is still respected — and so a
+      // deliberate pause() (used while LEO is speaking, to stop him
+      // hearing and re-triggering on his own voice) doesn't get
+      // immediately undone by this same auto-restart.
+      if (enabledRef.current && !pausedRef.current) {
         try {
           recognition.start();
         } catch {
@@ -117,6 +121,21 @@ export function useWakeWord(onWake: (commandSoFar: string) => void) {
     }
   }, [stop]);
 
+  /** Stop listening without turning wake-word mode off — used while LEO is
+   * speaking so he can't hear and re-trigger on his own voice. */
+  const pause = useCallback(() => {
+    pausedRef.current = true;
+    awakeRef.current = false;
+    if (awakeTimer.current) clearTimeout(awakeTimer.current);
+    recognitionRef.current?.stop();
+  }, []);
+
+  /** Resume listening after pause(), if wake-word mode is still on. */
+  const resume = useCallback(() => {
+    pausedRef.current = false;
+    if (enabledRef.current) start();
+  }, [start]);
+
   useEffect(() => {
     if (enabled) start();
     return () => {
@@ -125,5 +144,5 @@ export function useWakeWord(onWake: (commandSoFar: string) => void) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
-  return { state, enabled, toggle, lastTranscript, supported };
+  return { state, enabled, toggle, pause, resume, lastTranscript, supported };
 }

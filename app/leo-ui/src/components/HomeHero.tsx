@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Ear, ShieldCheck, Check, X, RotateCw, Settings2 } from "lucide-react";
 import LeoOrb, { LeoMood } from "./LeoOrb";
 import { useWakeWord } from "@/hooks/useWakeWord";
@@ -10,6 +10,15 @@ import { useSpeech } from "@/hooks/useSpeech";
 import { subscribeVoiceProfiles, matchVoiceProfile, touchVoiceProfile, VoiceProfile } from "@/lib/voiceProfiles";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Races a promise against a timeout so a stalled mic/getUserMedia call can
+ * never leave the response flow stuck. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
 
 const ERROR_COPY: Record<MicErrorKind, { title: string; detail: string }> = {
   blocked: {
@@ -67,8 +76,19 @@ export default function HomeHero({
   const { captureSignature } = useVoiceId();
   const { speak } = useSpeech();
   const orbSize = useOrbSize();
+  const respondRef = useRef<(command: string) => void>(() => {});
 
   useEffect(() => subscribeVoiceProfiles(setProfiles), []);
+
+  const {
+    state: wakeState,
+    enabled,
+    toggle,
+    pause,
+    resume,
+    supported,
+    lastTranscript,
+  } = useWakeWord((command) => respondRef.current(command));
 
   async function respondToWake(command: string) {
     onHeardCommand(command || "(wake word only)");
@@ -76,9 +96,14 @@ export default function HomeHero({
     await delay(500);
     setMood("thinking");
 
+    // Stop listening while we work out who's talking and while LEO
+    // replies — otherwise the mic can pick LEO's own voice back up
+    // through the speakers and re-trigger the wake flow forever.
+    pause();
+
     let name: string | undefined;
     if (profiles.length > 0) {
-      const capture = await captureSignature(1000);
+      const capture = await withTimeout(captureSignature(1000), 1800);
       if (capture) {
         const match = matchVoiceProfile(capture.signature, profiles);
         if (match) {
@@ -93,12 +118,11 @@ export default function HomeHero({
     setMood("speaking");
     await speak(text);
     setMood("idle");
+    resume();
     setTimeout(() => setGreeting(null), 2500);
   }
 
-  const { state: wakeState, enabled, toggle, supported, lastTranscript } = useWakeWord((command) => {
-    respondToWake(command);
-  });
+  respondRef.current = respondToWake;
 
   async function handleAllow() {
     const ok = await onRequestMic();
