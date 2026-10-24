@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Ear, ShieldCheck, Check, X, RotateCw, Settings2, ExternalLink } from "lucide-react";
-import LeoOrb, { LeoMood } from "./LeoOrb";
+import LeoOrb from "./LeoOrb";
 import { useWakeWord, VoiceLang } from "@/hooks/useWakeWord";
 import { MicErrorKind, MicPermissionState } from "@/hooks/useMicPermission";
 import { useVoiceId } from "@/hooks/useVoiceId";
 import { useSpeech } from "@/hooks/useSpeech";
+import { useLeoMood } from "@/hooks/useLeoMood";
 import { subscribeVoiceProfiles, matchVoiceProfile, touchVoiceProfile, VoiceProfile } from "@/lib/voiceProfiles";
 import { tryOpenCommand } from "@/lib/voiceCommands";
 
@@ -65,15 +66,19 @@ export default function HomeHero({
   micError,
   onRequestMic,
   voiceLang,
+  fullSpace = false,
 }: {
   onHeardCommand: (text: string) => void;
   micState: MicPermissionState;
   micError: MicErrorKind | null;
   onRequestMic: () => Promise<boolean>;
   voiceLang: VoiceLang;
+  /** Immersive mode — fill the entire available viewport so LEO has the
+   * whole space to roam, instead of just a hero-sized panel. */
+  fullSpace?: boolean;
 }) {
   const [micGateSeen, setMicGateSeen] = useState(false);
-  const [mood, setMood] = useState<LeoMood>("idle");
+  const { mood, setMood } = useLeoMood();
   const [greeting, setGreeting] = useState<string | null>(null);
   const [pendingLink, setPendingLink] = useState<{ url: string; label: string } | null>(null);
   const [profiles, setProfiles] = useState<VoiceProfile[]>([]);
@@ -83,6 +88,12 @@ export default function HomeHero({
   const respondRef = useRef<(command: string) => void>(() => {});
 
   useEffect(() => subscribeVoiceProfiles(setProfiles), []);
+
+  // Let his face reflect what's actually going on with the mic, not just
+  // whatever he was doing last.
+  useEffect(() => {
+    if (micState === "denied") setMood("sad");
+  }, [micState, setMood]);
 
   const {
     state: wakeState,
@@ -104,7 +115,7 @@ export default function HomeHero({
     return match.name;
   }
 
-  async function fetchAiReply(command: string): Promise<string> {
+  async function fetchAiReply(command: string): Promise<{ text: string; ok: boolean }> {
     const isSinhala = voiceLang === "si-LK";
     try {
       const res = await fetch("/api/chat", {
@@ -113,14 +124,18 @@ export default function HomeHero({
         body: JSON.stringify({ history: [{ role: "user", content: command }] }),
       });
       const data = await res.json();
-      return (
-        data.reply ??
-        (isSinhala ? "සමාවෙන්න, ආයෙත් කියන්න." : "Sorry, I didn't catch that — could you say it again?")
-      );
+      if (data.reply) return { text: data.reply, ok: true };
+      return {
+        text: isSinhala ? "සමාවෙන්න, ආයෙත් කියන්න." : "Sorry, I didn't catch that — could you say it again?",
+        ok: false,
+      };
     } catch {
-      return isSinhala
-        ? "දැන් system වලට reach වෙන්න බැරි උනා — ටිකකින් try කරන්න."
-        : "I couldn't reach my systems just now — try again shortly.";
+      return {
+        text: isSinhala
+          ? "දැන් system වලට reach වෙන්න බැරි උනා — ටිකකින් try කරන්න."
+          : "I couldn't reach my systems just now — try again shortly.",
+        ok: false,
+      };
     }
   }
 
@@ -168,7 +183,7 @@ export default function HomeHero({
           : `I have ${openCmd.label} ready, but your browser blocked me from opening it automatically — tap the link below.`;
       setGreeting(text);
       if (!win) setPendingLink(openCmd);
-      setMood("speaking");
+      setMood(win ? "happy" : "confused");
       await speak(text);
       setMood("idle");
       resume();
@@ -176,9 +191,9 @@ export default function HomeHero({
       return;
     }
 
-    const reply = await fetchAiReply(command);
+    const { text: reply, ok } = await fetchAiReply(command);
     setGreeting(reply);
-    setMood("speaking");
+    setMood(ok ? "happy" : "angry");
     await speak(reply);
     setMood("idle");
     resume();
@@ -194,9 +209,17 @@ export default function HomeHero({
   }
 
   return (
-    <div className="glass-panel relative flex min-h-[72vh] flex-col items-center justify-center gap-6 overflow-hidden rounded-2xl p-6">
-      <div className="flex flex-col items-center gap-2">
-        <LeoOrb mood={mood} size={orbSize} showLabel hud />
+    <div
+      className={`relative flex w-full flex-col items-center justify-center gap-6 overflow-hidden rounded-2xl p-6 ${
+        fullSpace ? "h-full" : "min-h-[72vh]"
+      }`}
+    >
+      {/* LEO roams this whole area freely instead of sitting pinned in place */}
+      <div className="pointer-events-none absolute inset-0">
+        <LeoOrb mood={mood} size={orbSize} showLabel hud freeRoam />
+      </div>
+
+      <div className="pointer-events-none relative z-10 flex flex-col items-center gap-2">
         <h1 className="mt-2 text-xl font-semibold tracking-wide text-foreground">
           LEO
         </h1>

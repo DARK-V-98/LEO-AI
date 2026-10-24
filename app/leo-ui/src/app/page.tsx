@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ListTodo, Users, Megaphone, Search, CalendarClock } from "lucide-react";
+import { ListTodo, Users, Megaphone, Search, CalendarClock, Eye, EyeOff } from "lucide-react";
 import CodeRainBackground from "@/components/CodeRainBackground";
 import Topbar from "@/components/Topbar";
 import StatCard from "@/components/StatCard";
@@ -16,6 +16,7 @@ import AdminPanel from "@/components/AdminPanel";
 import { useMicPermission } from "@/hooks/useMicPermission";
 import { VoiceLang } from "@/hooks/useWakeWord";
 import { useAuth } from "@/hooks/useAuth";
+import { LeoMoodProvider, LeoThemeSync } from "@/hooks/useLeoMood";
 import {
   subscribeTasks,
   subscribeLeads,
@@ -26,6 +27,7 @@ import {
 
 function DashboardApp() {
   const [tab, setTab] = useState<TabId>("home");
+  const [immersive, setImmersive] = useState(false);
   const [lastHeard, setLastHeard] = useState<string | null>(null);
   const [voiceLang, setVoiceLang] = useState<VoiceLang>("en-US");
   const mic = useMicPermission();
@@ -47,29 +49,46 @@ function DashboardApp() {
     tasks.length + leads.length + adSuggestions.length + seoIssues.length > 0;
 
   return (
-    <div className="relative flex min-h-screen w-full flex-col gap-4 p-4">
-      <CodeRainBackground />
+    <LeoMoodProvider>
+      <div className="relative flex min-h-screen w-full flex-col gap-4 p-4">
+        <CodeRainBackground />
+        <LeoThemeSync />
 
-      <Topbar
-        voiceLang={voiceLang}
-        onVoiceLangChange={setVoiceLang}
-        user={user}
-        onSignOut={signOut}
-        connectorsActive={0}
-      />
+        <button
+          onClick={() => setImmersive((v) => !v)}
+          title={immersive ? "Show interface" : "Hide interface — let LEO roam free"}
+          className="glass-panel fixed right-4 top-4 z-40 flex h-9 w-9 items-center justify-center rounded-full text-muted transition-colors hover:text-accent-cyan"
+        >
+          {immersive ? <Eye size={15} /> : <EyeOff size={15} />}
+        </button>
 
-      <main className="mx-auto w-full max-w-5xl flex-1">
+        <div
+          className={`transition-all duration-500 ease-out ${
+            immersive ? "pointer-events-none -translate-y-6 opacity-0" : "opacity-100"
+          }`}
+        >
+          <Topbar
+            voiceLang={voiceLang}
+            onVoiceLangChange={setVoiceLang}
+            user={user}
+            onSignOut={signOut}
+            connectorsActive={0}
+          />
+        </div>
+
+      <main className={`mx-auto w-full flex-1 ${immersive ? "max-w-none" : "max-w-5xl"}`}>
         {tab === "home" && (
-          <div className="flex flex-col gap-4">
+          <div className={immersive ? "flex h-[calc(100vh-2rem)] flex-col gap-4" : "flex flex-col gap-4"}>
             <HomeHero
               micState={mic.state}
               micError={mic.error}
               onRequestMic={mic.request}
               onHeardCommand={setLastHeard}
               voiceLang={voiceLang}
+              fullSpace={immersive}
             />
 
-            {lastHeard ? (
+            {lastHeard && !immersive ? (
               <div className="fade-up rounded-xl border border-panel-border bg-white/[0.02] px-4 py-2 text-center text-xs text-muted">
                 Heard: <span className="text-foreground">&quot;{lastHeard}&quot;</span>
               </div>
@@ -189,13 +208,20 @@ function DashboardApp() {
         )}
       </main>
 
-      <BottomNav
-        active={tab}
-        onChange={setTab}
-        showAdmin={isDeveloper}
-        badges={{ todo: tasks.length, leads: leads.length, ads: adSuggestions.length }}
-      />
-    </div>
+        <div
+          className={`transition-all duration-500 ease-out ${
+            immersive ? "pointer-events-none translate-y-6 opacity-0" : "opacity-100"
+          }`}
+        >
+          <BottomNav
+            active={tab}
+            onChange={setTab}
+            showAdmin={isDeveloper}
+            badges={{ todo: tasks.length, leads: leads.length, ads: adSuggestions.length }}
+          />
+        </div>
+      </div>
+    </LeoMoodProvider>
   );
 }
 

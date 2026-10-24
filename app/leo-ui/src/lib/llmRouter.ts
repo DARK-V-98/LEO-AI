@@ -13,9 +13,14 @@ const SYSTEM_PROMPT =
   "(සිංහල). Always reply in the same language the user's latest message is " +
   "written in — if they write or speak in Sinhala, reply entirely in " +
   "Sinhala script, not transliterated or translated to English; if they " +
-  "use English, reply in English. Keep Sinhala replies natural and " +
-  "conversational, the way a Sri Lankan colleague would actually speak, " +
-  "not a stiff literal translation. You cannot generate images yourself " +
+  "use English, reply in English. Many people here type Sinhala phonetically " +
+  "in English letters instead of Sinhala script (e.g. 'kohomada', 'oyata " +
+  "monawada one', 'mata eka kiyanna puluwanda') — understand that exactly " +
+  "the same as if it were written in Sinhala script, and reply in proper " +
+  "Sinhala script (not Singlish back, not English) unless they've shown a " +
+  "clear preference for Singlish specifically. Keep Sinhala replies " +
+  "natural and conversational, the way a Sri Lankan colleague would " +
+  "actually speak, not a stiff literal translation. You cannot generate images yourself " +
   "in this chat, but on WhatsApp you can: if asked (here or on WhatsApp) " +
   "to make a poster, flyer, or image, tell them to message you on " +
   "WhatsApp with 'poster: <description>' (e.g. 'poster: SmartLabs AI " +
@@ -124,10 +129,23 @@ async function tryGemini(
 // Sinhala Unicode block.
 const SINHALA_PATTERN = /[඀-෿]/;
 
+// "Singlish" — Sinhala written phonetically in Latin letters, which most
+// people here actually type day-to-day ("kohomada", "mokakda", "oyata
+// kiyanna"). None of these words have an everyday English meaning, so
+// matching any one of them is a reliable signal, unlike short ambiguous
+// ones (e.g. "ow", "ela") which were deliberately left out.
+const SINGLISH_PATTERN =
+  /\b(mokakda|mokada|kohomada|kohedada|kauda|kawda|kiyanna|kiyala|karanna|karala|denna|dෙන්න|oyata|oyage|oyaata|apita|apita|puluwanda|puluwan|baha|epaa|epa|harima|godak|wenawada|wenawa|innawada|innawa|yanawada|yanna|enawada|enna|thiyenawa|nathuwa|nemei|thamai|monawada|monawa|ayubowan|machang|hondatama|hodatama|hondai|hodai|aiyo|mehema|monada|kelinma|hithanne|hitanne|puluwannam)\b/i;
+
+function looksSinhala(text: string): boolean {
+  return SINHALA_PATTERN.test(text) || SINGLISH_PATTERN.test(text);
+}
+
 /** Tries free-tier OpenRouter models first, falls back to Gemini, then a
- * generic offline reply so the chat never just breaks. For Sinhala, Gemini
- * goes first instead — the free OpenRouter models are noticeably weaker at
- * it than Gemini is. */
+ * generic offline reply so the chat never just breaks. For Sinhala — native
+ * script or "Singlish" (Sinhala typed phonetically in English letters) —
+ * Gemini goes first instead: the free OpenRouter models are noticeably
+ * weaker at both than Gemini is. */
 export async function generateReply(
   history: ChatMessage[],
   context?: string,
@@ -150,7 +168,7 @@ export async function generateReply(
   }
 
   const lastUserMessage = [...history].reverse().find((m) => m.role === "user");
-  const isSinhala = lastUserMessage ? SINHALA_PATTERN.test(lastUserMessage.content) : false;
+  const isSinhala = lastUserMessage ? looksSinhala(lastUserMessage.content) : false;
 
   if (isSinhala) {
     const fromGemini = await tryGemini(messages);

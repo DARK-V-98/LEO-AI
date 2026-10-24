@@ -8,7 +8,10 @@ export type LeoMood =
   | "thinking"
   | "speaking"
   | "happy"
-  | "alert";
+  | "alert"
+  | "sad"
+  | "confused"
+  | "angry";
 
 const MOOD_RGB: Record<LeoMood, [number, number, number]> = {
   idle: [0, 229, 255],
@@ -17,6 +20,9 @@ const MOOD_RGB: Record<LeoMood, [number, number, number]> = {
   speaking: [0, 229, 255],
   happy: [57, 255, 156],
   alert: [255, 176, 32],
+  sad: [77, 140, 255],
+  confused: [217, 165, 44],
+  angry: [255, 59, 48],
 };
 
 const MOOD_LABEL: Record<LeoMood, string> = {
@@ -26,6 +32,24 @@ const MOOD_LABEL: Record<LeoMood, string> = {
   speaking: "Speaking",
   happy: "All good",
   alert: "Needs attention",
+  sad: "Sad",
+  confused: "Confused",
+  angry: "Frustrated",
+};
+
+/** How far the arms sit (base swing angle from vertical, in radians) and how
+ * much they sway/twitch per mood — this is what makes each emotion legible
+ * even at a glance, before you read the label underneath. */
+const ARM_MOOD: Record<LeoMood, { lift: number; sway: number; speed: number; jitter: number }> = {
+  idle: { lift: 0.08, sway: 0.12, speed: 0.6, jitter: 0 },
+  listening: { lift: 0.25, sway: 0.18, speed: 1.1, jitter: 0.02 },
+  thinking: { lift: 0.35, sway: 0.08, speed: 0.8, jitter: 0.04 },
+  speaking: { lift: 0.4, sway: 0.32, speed: 1.6, jitter: 0.03 },
+  happy: { lift: 0.75, sway: 0.4, speed: 2.2, jitter: 0 },
+  alert: { lift: 0.5, sway: 0.15, speed: 2.4, jitter: 0.08 },
+  sad: { lift: -0.55, sway: 0.05, speed: 0.3, jitter: 0 },
+  confused: { lift: 0.15, sway: 0.5, speed: 2.8, jitter: 0.12 },
+  angry: { lift: -0.1, sway: 0.1, speed: 3.4, jitter: 0.18 },
 };
 
 function fibonacciSphere(count: number): [number, number, number][] {
@@ -72,20 +96,26 @@ export default function LeoOrb({
   size = 180,
   showLabel = false,
   hud = false,
+  freeRoam = false,
 }: {
   mood?: LeoMood;
   size?: number;
   showLabel?: boolean;
   /** Extra HUD rings + ticks, for the big hero presentation. */
   hud?: boolean;
+  /** Let him drift around his containing element instead of sitting still —
+   * the container must be `position: relative` (or similar) with real size. */
+  freeRoam?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const pointsRef = useRef<[number, number, number][]>([]);
   const dustRef = useRef<Dust[]>([]);
   const codeRef = useRef<CodeBit[]>([]);
   const rotRef = useRef({ y: 0, x: 0.35 });
   const moodRef = useRef(mood);
   moodRef.current = mood;
+  const roamRef = useRef({ x: 0, y: 0, vx: 0, vy: 0, ready: false });
 
   useEffect(() => {
     const density = Math.max(320, Math.round(size * 3.4));
@@ -136,6 +166,50 @@ export default function LeoOrb({
             : currentMood === "listening"
               ? 0.055
               : 0.015;
+
+      // free-roam drift — a gentle random walk across the containing
+      // element, bounced off its edges, so LEO isn't pinned to one spot
+      if (freeRoam && wrapRef.current) {
+        const parent = wrapRef.current.parentElement;
+        if (parent) {
+          const maxX = Math.max(0, parent.clientWidth - size);
+          const maxY = Math.max(0, parent.clientHeight - size);
+          const p = roamRef.current;
+          if (!p.ready) {
+            p.x = maxX / 2;
+            p.y = maxY / 2;
+            p.vx = (Math.random() - 0.5) * 0.3;
+            p.vy = (Math.random() - 0.5) * 0.3;
+            p.ready = true;
+          }
+          const roamSpeed =
+            currentMood === "angry" ? 1 : currentMood === "sad" ? 0.3 : 0.55;
+          p.vx += (Math.random() - 0.5) * 0.03 * roamSpeed;
+          p.vy += (Math.random() - 0.5) * 0.03 * roamSpeed;
+          const maxSpeed = 0.5 * roamSpeed;
+          p.vx = Math.max(-maxSpeed, Math.min(maxSpeed, p.vx));
+          p.vy = Math.max(-maxSpeed, Math.min(maxSpeed, p.vy));
+          p.x += p.vx;
+          p.y += p.vy;
+          if (p.x < 0) {
+            p.x = 0;
+            p.vx = Math.abs(p.vx);
+          }
+          if (p.x > maxX) {
+            p.x = maxX;
+            p.vx = -Math.abs(p.vx);
+          }
+          if (p.y < 0) {
+            p.y = 0;
+            p.vy = Math.abs(p.vy);
+          }
+          if (p.y > maxY) {
+            p.y = maxY;
+            p.vy = -Math.abs(p.vy);
+          }
+          wrapRef.current.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
+        }
+      }
 
       ctx!.clearRect(0, 0, size, size);
 
@@ -207,18 +281,61 @@ export default function LeoOrb({
       ctx!.arc(cx, cy, R * 1.5, 0, Math.PI * 2);
       ctx!.fill();
 
+      // arms — two limbs that gesture according to mood (raised + waving
+      // when happy, drooping when sad, sharp and twitchy when angry, etc.)
+      const armCfg = ARM_MOOD[currentMood];
+      const sway = Math.sin(t * armCfg.speed) * armCfg.sway;
+      const jitter = armCfg.jitter
+        ? (Math.sin(t * 19 + 3) + Math.sin(t * 27)) * armCfg.jitter
+        : 0;
+      for (const side of [-1, 1] as const) {
+        const shoulderAngle = side * (Math.PI / 2 - 0.15);
+        const sx = cx + Math.cos(shoulderAngle) * R * 0.92;
+        const sy = cy + Math.sin(shoulderAngle) * R * 0.55 + R * 0.05;
+        const reach = R * (1.3 + armCfg.lift * 0.35);
+        const armAngle =
+          side * (Math.PI / 2 + 0.3 + armCfg.lift) + sway * side + jitter;
+        const elbowX = sx + Math.cos(armAngle) * reach * 0.55;
+        const elbowY = sy + Math.sin(armAngle) * reach * 0.55 + R * 0.25;
+        const handAngle =
+          armAngle + Math.sin(t * armCfg.speed * 1.3 + side) * (0.2 + armCfg.sway * 0.5);
+        const handX = elbowX + Math.cos(handAngle) * reach * 0.55;
+        const handY = elbowY + Math.sin(handAngle) * reach * 0.55;
+
+        ctx!.beginPath();
+        ctx!.moveTo(sx, sy);
+        ctx!.quadraticCurveTo(elbowX, elbowY, handX, handY);
+        ctx!.strokeStyle = `rgba(${r},${g},${b},0.5)`;
+        ctx!.lineWidth = Math.max(1.2, size * 0.011);
+        ctx!.lineCap = "round";
+        ctx!.stroke();
+
+        ctx!.beginPath();
+        ctx!.fillStyle = `rgba(${r},${g},${b},0.9)`;
+        ctx!.arc(handX, handY, Math.max(1.6, size * 0.017), 0, Math.PI * 2);
+        ctx!.fill();
+      }
+
       raf = requestAnimationFrame(draw);
     }
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [size]);
+  }, [size, freeRoam]);
 
   const [r, g, b] = MOOD_RGB[mood];
   const rgb = `${r},${g},${b}`;
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div
+      ref={wrapRef}
+      className={
+        freeRoam
+          ? "absolute left-0 top-0 flex flex-col items-center gap-3"
+          : "flex flex-col items-center gap-3"
+      }
+      style={freeRoam ? { willChange: "transform", transition: "filter 0.6s ease" } : undefined}
+    >
       <div
         className="relative flex items-center justify-center rounded-full"
         style={{ width: size, height: size }}
