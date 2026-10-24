@@ -40,24 +40,40 @@ function fibonacciSphere(count: number): [number, number, number][] {
   return pts;
 }
 
+type Dust = { angle: number; radius: number; speed: number; phase: number };
+
+function makeDust(count: number): Dust[] {
+  return Array.from({ length: count }, () => ({
+    angle: Math.random() * Math.PI * 2,
+    radius: 1.3 + Math.random() * 0.9,
+    speed: (Math.random() - 0.5) * 0.012,
+    phase: Math.random() * Math.PI * 2,
+  }));
+}
+
 export default function LeoOrb({
   mood = "idle",
   size = 180,
   showLabel = false,
+  hud = false,
 }: {
   mood?: LeoMood;
   size?: number;
   showLabel?: boolean;
+  /** Extra HUD rings + ticks, for the big hero presentation. */
+  hud?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointsRef = useRef<[number, number, number][]>([]);
+  const dustRef = useRef<Dust[]>([]);
   const rotRef = useRef({ y: 0, x: 0.35 });
   const moodRef = useRef(mood);
   moodRef.current = mood;
 
   useEffect(() => {
-    const density = Math.max(260, Math.round(size * 2.6));
+    const density = Math.max(320, Math.round(size * 3.4));
     pointsRef.current = fibonacciSphere(density);
+    dustRef.current = makeDust(Math.max(24, Math.round(size / 6)));
   }, [size]);
 
   useEffect(() => {
@@ -82,7 +98,7 @@ export default function LeoOrb({
       const [r, g, b] = MOOD_RGB[currentMood];
       const cx = size / 2;
       const cy = size / 2;
-      const R = size * 0.37;
+      const R = size * 0.34;
 
       const speed =
         currentMood === "speaking"
@@ -96,14 +112,26 @@ export default function LeoOrb({
 
       const jitterAmp =
         currentMood === "speaking"
-          ? 0.085
+          ? 0.09
           : currentMood === "thinking"
             ? 0.035
             : currentMood === "listening"
-              ? 0.05
+              ? 0.055
               : 0.015;
 
       ctx!.clearRect(0, 0, size, size);
+
+      // drifting dust ring behind the sphere
+      for (const d of dustRef.current) {
+        d.angle += d.speed;
+        const twinkle = 0.25 + Math.abs(Math.sin(t * 1.4 + d.phase)) * 0.55;
+        const px = cx + Math.cos(d.angle) * R * d.radius;
+        const py = cy + Math.sin(d.angle) * R * d.radius * 0.72;
+        ctx!.beginPath();
+        ctx!.fillStyle = `rgba(${r},${g},${b},${twinkle.toFixed(3)})`;
+        ctx!.arc(px, py, 1 + twinkle, 0, Math.PI * 2);
+        ctx!.fill();
+      }
 
       const cosY = Math.cos(rotRef.current.y);
       const sinY = Math.sin(rotRef.current.y);
@@ -116,29 +144,32 @@ export default function LeoOrb({
         const z1 = x * sinY + z * cosY;
         const y1 = y * cosX - z1 * sinX;
         const z2 = y * sinX + z1 * cosX;
-        return [x1 * wobble, y1 * wobble, z2] as [number, number, number];
+        return [x1 * wobble, y1 * wobble, z2, i] as [number, number, number, number];
       });
 
-      projected.sort((a, b) => a[2] - b[2]);
+      projected.sort((a, b2) => a[2] - b2[2]);
 
-      for (const [x, y, z] of projected) {
+      for (const [x, y, z, i] of projected) {
         const depth = (z + 1) / 2;
         const px = cx + x * R;
         const py = cy + y * R;
-        const alpha = 0.12 + depth * 0.7;
-        const radius = 0.5 + depth * 1.6;
+        // bright "energy seam" bands sweep across a few latitude lines
+        const seam = Math.sin(i * 0.17 + t * 1.6) > 0.965;
+        const alpha = (seam ? 0.55 : 0.1) + depth * (seam ? 0.45 : 0.72);
+        const radius = (seam ? 1.1 : 0.5) + depth * (seam ? 2.1 : 1.6);
         ctx!.beginPath();
-        ctx!.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
+        ctx!.fillStyle = `rgba(${r},${g},${b},${Math.min(alpha, 1).toFixed(3)})`;
         ctx!.arc(px, py, radius, 0, Math.PI * 2);
         ctx!.fill();
       }
 
-      const glow = ctx!.createRadialGradient(cx, cy, 0, cx, cy, R * 1.25);
-      glow.addColorStop(0, `rgba(${r},${g},${b},0.16)`);
+      const glow = ctx!.createRadialGradient(cx, cy, 0, cx, cy, R * 1.5);
+      glow.addColorStop(0, `rgba(${r},${g},${b},0.18)`);
+      glow.addColorStop(0.6, `rgba(${r},${g},${b},0.05)`);
       glow.addColorStop(1, `rgba(${r},${g},${b},0)`);
       ctx!.fillStyle = glow;
       ctx!.beginPath();
-      ctx!.arc(cx, cy, R * 1.25, 0, Math.PI * 2);
+      ctx!.arc(cx, cy, R * 1.5, 0, Math.PI * 2);
       ctx!.fill();
 
       raf = requestAnimationFrame(draw);
@@ -149,30 +180,74 @@ export default function LeoOrb({
   }, [size]);
 
   const [r, g, b] = MOOD_RGB[mood];
+  const rgb = `${r},${g},${b}`;
 
   return (
-    <div className="flex flex-col items-center gap-2">
+    <div className="flex flex-col items-center gap-3">
       <div
         className="relative flex items-center justify-center rounded-full"
         style={{ width: size, height: size }}
       >
+        {hud ? (
+          <>
+            <svg
+              className="absolute"
+              style={{
+                width: size * 1.32,
+                height: size * 1.32,
+                animation: "spin 40s linear infinite",
+              }}
+              viewBox="0 0 100 100"
+            >
+              <circle
+                cx="50"
+                cy="50"
+                r="47"
+                fill="none"
+                stroke={`rgba(${rgb},0.25)`}
+                strokeWidth="0.4"
+                strokeDasharray="1 4"
+              />
+            </svg>
+            <svg
+              className="absolute"
+              style={{
+                width: size * 1.18,
+                height: size * 1.18,
+                animation: "spin-reverse 26s linear infinite",
+              }}
+              viewBox="0 0 100 100"
+            >
+              <circle
+                cx="50"
+                cy="50"
+                r="46"
+                fill="none"
+                stroke={`rgba(${rgb},0.4)`}
+                strokeWidth="0.3"
+                strokeDasharray="12 3 1 3"
+              />
+            </svg>
+          </>
+        ) : null}
+
         <span
           className="pulse-ring absolute inset-0 rounded-full"
-          style={{ border: `1px solid rgba(${r},${g},${b},0.6)` }}
+          style={{ border: `1px solid rgba(${rgb},0.6)` }}
         />
         <canvas
           ref={canvasRef}
           style={{
             width: size,
             height: size,
-            filter: `drop-shadow(0 0 ${size * 0.18}px rgba(${r},${g},${b},0.55))`,
+            filter: `drop-shadow(0 0 ${size * 0.22}px rgba(${rgb},0.6))`,
           }}
         />
       </div>
       {showLabel ? (
         <span
           className="font-mono text-[11px] tracking-wide"
-          style={{ color: `rgb(${r},${g},${b})` }}
+          style={{ color: `rgb(${rgb})` }}
         >
           {MOOD_LABEL[mood]}
         </span>

@@ -57,6 +57,7 @@ export default function Home() {
           <div className="flex flex-col gap-4">
             <HomeHero
               micState={mic.state}
+              micError={mic.error}
               onRequestMic={mic.request}
               onHeardCommand={setLastHeard}
             />
@@ -66,7 +67,11 @@ export default function Home() {
                 Heard: <span className="text-foreground">&quot;{lastHeard}&quot;</span>
               </div>
             ) : null}
+          </div>
+        )}
 
+        {tab === "overview" && (
+          <div className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <StatCard label="To-Do Today" value="5" delta="2 new" icon={ListTodo} accent="cyan" />
               <StatCard label="New Leads" value="3" delta="+3 today" icon={Users} accent="violet" />

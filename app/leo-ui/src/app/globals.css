@@ -164,6 +164,15 @@ body {
   transform-origin: bottom;
 }
 
+@keyframes spin-reverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
 @keyframes fade-up {
   from {
     opacity: 0;

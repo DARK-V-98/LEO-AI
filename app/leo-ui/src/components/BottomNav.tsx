@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Bot,
   LayoutDashboard,
   MessageCircle,
   ListTodo,
@@ -15,6 +16,7 @@ import {
 
 export type TabId =
   | "home"
+  | "overview"
   | "chat"
   | "todo"
   | "leads"
@@ -25,7 +27,8 @@ export type TabId =
   | "voices";
 
 const ITEMS: { id: TabId; label: string; icon: LucideIcon; badge?: number }[] = [
-  { id: "home", label: "Home", icon: LayoutDashboard },
+  { id: "home", label: "LEO", icon: Bot },
+  { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "todo", label: "To-Do", icon: ListTodo, badge: 5 },
   { id: "leads", label: "Leads", icon: Users, badge: 3 },

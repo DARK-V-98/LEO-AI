@@ -12,6 +12,19 @@ const nextConfig: NextConfig = {
       },
     },
   },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          // Explicitly allow this origin to request the microphone —
+          // defensive, in case a platform default would otherwise
+          // restrict it and silently swallow getUserMedia() calls.
+          { key: "Permissions-Policy", value: "microphone=(self)" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
