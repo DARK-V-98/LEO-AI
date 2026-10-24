@@ -6,19 +6,27 @@ export type WakeState = "idle" | "listening" | "awake" | "unsupported" | "denied
 
 const WAKE_PATTERN = /\bhey\s+leo\b|\bleo\b/i;
 
+// How long to wait, after the last bit of new speech, before treating the
+// command as finished and handing it off. Without this, the hook used to
+// fire the instant it heard "Leo" — cutting "Leo, open YouTube" down to
+// just "Leo" and throwing the rest away.
+const COLLECT_SILENCE_MS = 1000;
+
 /**
  * Always-on "say the wake word" listener. This never calls an LLM — it's a
  * plain speech-to-text loop watching only for the word "Leo" (or "Hey Leo").
- * Only once that fires does anything get handed to the AI layer, same as a
- * phone's "Hey Siri" detector sitting in front of the actual assistant.
+ * Only once a full command is collected (speech pauses) does anything get
+ * handed to the AI layer, same as a phone's "Hey Siri" detector sitting in
+ * front of the actual assistant.
  */
-export function useWakeWord(onWake: (commandSoFar: string) => void) {
+export function useWakeWord(onWake: (command: string) => void) {
   const [state, setState] = useState<WakeState>("idle");
   const [enabled, setEnabled] = useState(false);
   const [lastTranscript, setLastTranscript] = useState("");
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const awakeRef = useRef(false);
-  const awakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const collectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCommand = useRef("");
   const onWakeRef = useRef(onWake);
   onWakeRef.current = onWake;
   const enabledRef = useRef(false);
@@ -28,12 +36,19 @@ export function useWakeWord(onWake: (commandSoFar: string) => void) {
     typeof window !== "undefined" &&
     Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
 
+  const clearCollectTimer = () => {
+    if (collectTimer.current) {
+      clearTimeout(collectTimer.current);
+      collectTimer.current = null;
+    }
+  };
+
   const stop = useCallback(() => {
     enabledRef.current = false;
     setEnabled(false);
     recognitionRef.current?.stop();
     recognitionRef.current = null;
-    if (awakeTimer.current) clearTimeout(awakeTimer.current);
+    clearCollectTimer();
     awakeRef.current = false;
     setState("idle");
   }, []);
@@ -49,6 +64,13 @@ export function useWakeWord(onWake: (commandSoFar: string) => void) {
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
+    const finalizeCommand = () => {
+      const command = pendingCommand.current;
+      awakeRef.current = false;
+      setState("listening");
+      onWakeRef.current(command);
+    };
+
     recognition.onresult = (event) => {
       let transcript = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -56,26 +78,17 @@ export function useWakeWord(onWake: (commandSoFar: string) => void) {
       }
       setLastTranscript(transcript);
 
-      if (!awakeRef.current && WAKE_PATTERN.test(transcript)) {
+      if (!awakeRef.current) {
+        if (!WAKE_PATTERN.test(transcript)) return;
         awakeRef.current = true;
         setState("awake");
-        const afterWake = transcript.split(WAKE_PATTERN).pop()?.trim() ?? "";
-        onWakeRef.current(afterWake);
-
-        if (awakeTimer.current) clearTimeout(awakeTimer.current);
-        awakeTimer.current = setTimeout(() => {
-          awakeRef.current = false;
-          setState("listening");
-        }, 6000);
-      } else if (awakeRef.current) {
-        // still within the active command window — keep handing text over
-        onWakeRef.current(transcript);
-        if (awakeTimer.current) clearTimeout(awakeTimer.current);
-        awakeTimer.current = setTimeout(() => {
-          awakeRef.current = false;
-          setState("listening");
-        }, 6000);
       }
+
+      // Whether this is the triggering event or a continuation, strip any
+      // wake-word prefix and keep collecting until speech pauses.
+      pendingCommand.current = transcript.split(WAKE_PATTERN).pop()?.trim() ?? "";
+      clearCollectTimer();
+      collectTimer.current = setTimeout(finalizeCommand, COLLECT_SILENCE_MS);
     };
 
     recognition.onerror = (event) => {
@@ -126,7 +139,7 @@ export function useWakeWord(onWake: (commandSoFar: string) => void) {
   const pause = useCallback(() => {
     pausedRef.current = true;
     awakeRef.current = false;
-    if (awakeTimer.current) clearTimeout(awakeTimer.current);
+    clearCollectTimer();
     recognitionRef.current?.stop();
   }, []);
 

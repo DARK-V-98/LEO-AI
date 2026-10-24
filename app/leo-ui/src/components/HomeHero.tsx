@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Ear, ShieldCheck, Check, X, RotateCw, Settings2 } from "lucide-react";
+import { Mic, MicOff, Ear, ShieldCheck, Check, X, RotateCw, Settings2, ExternalLink } from "lucide-react";
 import LeoOrb, { LeoMood } from "./LeoOrb";
 import { useWakeWord } from "@/hooks/useWakeWord";
 import { MicErrorKind, MicPermissionState } from "@/hooks/useMicPermission";
 import { useVoiceId } from "@/hooks/useVoiceId";
 import { useSpeech } from "@/hooks/useSpeech";
 import { subscribeVoiceProfiles, matchVoiceProfile, touchVoiceProfile, VoiceProfile } from "@/lib/voiceProfiles";
+import { tryOpenCommand } from "@/lib/voiceCommands";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -72,6 +73,7 @@ export default function HomeHero({
   const [micGateSeen, setMicGateSeen] = useState(false);
   const [mood, setMood] = useState<LeoMood>("idle");
   const [greeting, setGreeting] = useState<string | null>(null);
+  const [pendingLink, setPendingLink] = useState<{ url: string; label: string } | null>(null);
   const [profiles, setProfiles] = useState<VoiceProfile[]>([]);
   const { captureSignature } = useVoiceId();
   const { speak } = useSpeech();
@@ -90,36 +92,77 @@ export default function HomeHero({
     lastTranscript,
   } = useWakeWord((command) => respondRef.current(command));
 
+  async function identifySpeaker(): Promise<string | undefined> {
+    if (profiles.length === 0) return undefined;
+    const capture = await withTimeout(captureSignature(1000), 1800);
+    if (!capture) return undefined;
+    const match = matchVoiceProfile(capture.signature, profiles);
+    if (!match) return undefined;
+    touchVoiceProfile(match.id, capture.signature);
+    return match.name;
+  }
+
+  async function fetchAiReply(command: string): Promise<string> {
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ history: [{ role: "user", content: command }] }),
+      });
+      const data = await res.json();
+      return data.reply ?? "Sorry, I didn't catch that — could you say it again?";
+    } catch {
+      return "I couldn't reach my systems just now — try again shortly.";
+    }
+  }
+
   async function respondToWake(command: string) {
     onHeardCommand(command || "(wake word only)");
     setMood("listening");
     await delay(500);
     setMood("thinking");
 
-    // Stop listening while we work out who's talking and while LEO
-    // replies — otherwise the mic can pick LEO's own voice back up
-    // through the speakers and re-trigger the wake flow forever.
+    // Stop listening while LEO works out what to do and replies —
+    // otherwise the mic can pick his own voice back up through the
+    // speakers and re-trigger the wake flow forever.
     pause();
+    setPendingLink(null);
 
-    let name: string | undefined;
-    if (profiles.length > 0) {
-      const capture = await withTimeout(captureSignature(1000), 1800);
-      if (capture) {
-        const match = matchVoiceProfile(capture.signature, profiles);
-        if (match) {
-          name = match.name;
-          touchVoiceProfile(match.id, capture.signature);
-        }
-      }
+    if (!command) {
+      const name = await identifySpeaker();
+      const text = name ? `Hi ${name}, I'm listening.` : "I'm listening.";
+      setGreeting(text);
+      setMood("speaking");
+      await speak(text);
+      setMood("idle");
+      resume();
+      setTimeout(() => setGreeting(null), 2500);
+      return;
     }
 
-    const text = name ? `Hi ${name}, I'm listening.` : "I'm listening.";
-    setGreeting(text);
+    const openCmd = tryOpenCommand(command);
+    if (openCmd) {
+      const win = window.open(openCmd.url, "_blank", "noopener,noreferrer");
+      const text = win
+        ? `Opening ${openCmd.label} for you.`
+        : `I have ${openCmd.label} ready, but your browser blocked me from opening it automatically — tap the link below.`;
+      setGreeting(text);
+      if (!win) setPendingLink(openCmd);
+      setMood("speaking");
+      await speak(text);
+      setMood("idle");
+      resume();
+      setTimeout(() => setGreeting(null), 6000);
+      return;
+    }
+
+    const reply = await fetchAiReply(command);
+    setGreeting(reply);
     setMood("speaking");
-    await speak(text);
+    await speak(reply);
     setMood("idle");
     resume();
-    setTimeout(() => setGreeting(null), 2500);
+    setTimeout(() => setGreeting(null), 6000);
   }
 
   respondRef.current = respondToWake;
@@ -143,9 +186,21 @@ export default function HomeHero({
       </div>
 
       {greeting ? (
-        <div className="fade-up rounded-full border border-accent-cyan/30 bg-accent-cyan/5 px-4 py-1 text-xs text-foreground">
+        <div className="fade-up max-w-md rounded-2xl border border-accent-cyan/30 bg-accent-cyan/5 px-4 py-2 text-center text-xs leading-relaxed text-foreground">
           {greeting}
         </div>
+      ) : null}
+
+      {pendingLink ? (
+        <a
+          href={pendingLink.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fade-up flex items-center gap-2 rounded-xl bg-accent-cyan/15 px-4 py-2 text-xs font-medium text-accent-cyan hover:bg-accent-cyan/25"
+        >
+          <ExternalLink size={13} />
+          Open {pendingLink.label}
+        </a>
       ) : null}
 
       {!micGateSeen && micState === "unset" ? (
