@@ -53,14 +53,20 @@ dates, not the AI — so these are fast and don't cost an AI call):
   for then instead. LEO only matches against groups he's actually a
   member of; if the name doesn't match, he says so rather than guessing.
 
+- **Every message is saved** — every DM and group message either side
+  sends is permanently stored in Firestore (`whatsappChats/{chatJid}/
+  messages`), not just kept in memory until a restart. Each chat (a
+  person's DM, or a group) has its own history; one person's DM is never
+  read from or mixed into anyone else's chat — a group's history is
+  naturally shared with that group already, same as WhatsApp itself.
+  This is what gives LEO conversational memory ("what did I just ask")
+  and lets it survive a restart/redeploy.
 - **"remember that \<fact\>"** — e.g. `remember that our office closes at
-  5pm on Fridays` — explicitly teaches LEO something. It gets added to
-  Firestore (`companyKnowledge`) and from then on is included as context
-  in *every* chat, group and DM alike, so he doesn't need to be told
-  again. This is the deliberate, safe way to grow what he knows — he does
-  **not** passively log or learn from ordinary conversation content,
-  especially not from private DMs, to avoid one person's private chat
-  leaking into what LEO says to someone else.
+  5pm on Fridays` — on top of the above, this *deliberately* promotes
+  something to permanent company knowledge (`companyKnowledge`),
+  included as context in *every* chat, group and DM alike, not just
+  that one conversation's own history. Use this for things that should
+  be common knowledge, not just "what we were just talking about".
 - **Introducing yourself** — say something like "I'm Vishwa, the software
   engineer and developer of the AI and systems" and he remembers your
   name/role (stored per WhatsApp number in Firestore's `people`

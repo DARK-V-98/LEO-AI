@@ -68,14 +68,50 @@ let starting = false;
 // a leftover unprocessed "link" command both firing at startup.
 let socketState = "idle";
 
-// Short-lived, in-memory per-chat conversation context (lost on restart —
-// good enough for "what did I just ask", not meant as permanent history).
+// Every message either side sends is kept permanently — not just an
+// in-memory cache that forgets on restart. Each chat (a DM's JID, or a
+// group's JID) gets its own Firestore subcollection, so one person's DM
+// history is never readable from, or mixed into, anyone else's chat — a
+// group's history is naturally shared with that group already, same as
+// WhatsApp itself.
+function chatMessagesRef(jid) {
+  return db.collection("whatsappChats").doc(jid).collection("messages");
+}
+
 const chatMemory = new Map();
+const HISTORY_FOR_AI = 12; // how much recent context to actually send the model
+
 function remember(jid, role, content) {
   const history = chatMemory.get(jid) ?? [];
   history.push({ role, content });
-  while (history.length > 12) history.shift();
+  while (history.length > HISTORY_FOR_AI) history.shift();
   chatMemory.set(jid, history);
+
+  chatMessagesRef(jid)
+    .add({ role, content, createdAt: Date.now() })
+    .catch((err) => console.error(`Failed to persist message for ${jid}:`, err));
+}
+
+/** On the first message from a JID since this process started, pull its
+ * recent history back from Firestore so context survives a restart. */
+async function ensureHistoryLoaded(jid) {
+  if (chatMemory.has(jid)) return;
+  try {
+    const snap = await chatMessagesRef(jid)
+      .orderBy("createdAt", "desc")
+      .limit(HISTORY_FOR_AI)
+      .get();
+    const history = snap.docs
+      .map((d) => {
+        const data = d.data();
+        return { role: data.role, content: data.content };
+      })
+      .reverse();
+    chatMemory.set(jid, history);
+  } catch (err) {
+    console.error(`Failed to load history for ${jid}:`, err);
+    chatMemory.set(jid, []);
+  }
 }
 
 // --- Company knowledge & people memory -------------------------------------
@@ -174,8 +210,7 @@ const HELP_TEXT = [
   "In the company group, say “Leo” so I know you're talking to me.",
 ].join("\n");
 
-async function askLeo(jid, text) {
-  remember(jid, "user", text);
+async function askLeo(jid) {
   if (!WEB_BASE_URL) {
     return "I'm not fully set up to chat here yet — ask the team to finish the WhatsApp setup (LEO_WEB_BASE_URL).";
   }
@@ -430,6 +465,11 @@ function attachMessageHandler(activeSock) {
 
         await activeSock.sendPresenceUpdate("composing", remoteJid).catch(() => {});
 
+        // Every message gets permanently saved here, once, regardless of
+        // which branch below ends up handling it — not just AI replies.
+        await ensureHistoryLoaded(remoteJid);
+        remember(remoteJid, "user", askText);
+
         // Learn who's speaking, silently — never changes what gets replied.
         maybeLearnIntroduction(senderJid, askText).catch(() => {});
 
@@ -440,12 +480,13 @@ function attachMessageHandler(activeSock) {
 
         if (HELP_PATTERN.test(askText)) {
           await activeSock.sendMessage(remoteJid, { text: HELP_TEXT });
+          remember(remoteJid, "assistant", HELP_TEXT);
         } else if (rememberMatch) {
           const fact = rememberMatch[1].trim();
           await rememberFact(fact, senderJid, isGroup ? "group" : "dm");
-          await activeSock.sendMessage(remoteJid, {
-            text: `Got it — I'll remember that: "${fact}".`,
-          });
+          const confirmText = `Got it — I'll remember that: "${fact}".`;
+          await activeSock.sendMessage(remoteJid, { text: confirmText });
+          remember(remoteJid, "assistant", confirmText);
           await db
             .collection("activity")
             .add({
@@ -460,13 +501,15 @@ function attachMessageHandler(activeSock) {
           try {
             const referenceImage = await downloadReferenceImage(activeSock, msg);
             const { image, mimeType } = await generatePoster(prompt, referenceImage);
+            const caption = referenceImage
+              ? `Here's your poster (using your reference image): "${prompt}"`
+              : `Here's your poster: "${prompt}"`;
             await activeSock.sendMessage(remoteJid, {
               image: Buffer.from(image, "base64"),
               mimetype: mimeType,
-              caption: referenceImage
-                ? `Here's your poster (using your reference image): "${prompt}"`
-                : `Here's your poster: "${prompt}"`,
+              caption,
             });
+            remember(remoteJid, "assistant", caption);
             await db
               .collection("activity")
               .add({
@@ -477,63 +520,90 @@ function attachMessageHandler(activeSock) {
               })
               .catch(() => {});
           } catch (err) {
-            await activeSock.sendMessage(remoteJid, {
-              text: `Couldn't generate that poster — ${err.message || "try again shortly"}.`,
-            });
+            const errText = `Couldn't generate that poster — ${err.message || "try again shortly"}.`;
+            await activeSock.sendMessage(remoteJid, { text: errText });
+            remember(remoteJid, "assistant", errText);
           }
         } else if (/\bremind me\b/i.test(askText) && !reminder) {
           // They said "remind me" but no time was understood.
-          await activeSock.sendMessage(remoteJid, {
-            text: 'What time should I remind you? e.g. "remind me in 20 minutes to call the vendor" or "remind me tomorrow at 9am to send the report".',
-          });
+          const askTimeText =
+            'What time should I remind you? e.g. "remind me in 20 minutes to call the vendor" or "remind me tomorrow at 9am to send the report".';
+          await activeSock.sendMessage(remoteJid, { text: askTimeText });
+          remember(remoteJid, "assistant", askTimeText);
         } else if (reminder) {
-          const dueAt = reminder.due.getTime();
-          await scheduleMessage({
-            type: "reminder",
-            targetJid: senderJid,
-            targetLabel: "you",
-            message: reminder.note,
-            dueAt,
-            createdBy: senderJid,
-          });
-          await activeSock.sendMessage(remoteJid, {
-            text: `Got it — I'll remind you about "${reminder.note}" on ${formatDue(reminder.due)}.`,
-          });
-        } else if (groupSend) {
-          const group = await resolveGroup(activeSock, groupSend.groupNameRaw).catch(() => null);
-          if (!group) {
-            await activeSock.sendMessage(remoteJid, {
-              text: `I couldn't find a group called "${groupSend.groupNameRaw}" that I'm a member of.`,
-            });
-          } else if (groupSend.due) {
+          try {
+            const dueAt = reminder.due.getTime();
+            console.log(
+              `[reminder] scheduling for ${senderJid}: "${reminder.note}" at ${new Date(dueAt).toISOString()} (in ${Math.round((dueAt - Date.now()) / 1000)}s)`
+            );
             await scheduleMessage({
-              type: "group",
-              targetJid: group.jid,
-              targetLabel: group.name,
-              message: groupSend.message,
-              dueAt: groupSend.due.getTime(),
+              type: "reminder",
+              targetJid: senderJid,
+              targetLabel: "you",
+              message: reminder.note,
+              dueAt,
               createdBy: senderJid,
             });
-            await activeSock.sendMessage(remoteJid, {
-              text: `Scheduled — I'll message "${group.name}" on ${formatDue(groupSend.due)}.`,
+            const confirmText = `Got it — I'll remind you about "${reminder.note}" on ${formatDue(reminder.due)}.`;
+            await activeSock.sendMessage(remoteJid, { text: confirmText });
+            remember(remoteJid, "assistant", confirmText);
+          } catch (err) {
+            console.error("Failed to schedule reminder:", err);
+            const errText = "Something went wrong setting that reminder — please try again.";
+            await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
+            remember(remoteJid, "assistant", errText);
+          }
+        } else if (groupSend) {
+          try {
+            const group = await resolveGroup(activeSock, groupSend.groupNameRaw).catch((err) => {
+              console.error("Failed to resolve group list:", err);
+              return null;
             });
-          } else {
-            await activeSock.sendMessage(group.jid, { text: groupSend.message });
-            await activeSock.sendMessage(remoteJid, {
-              text: `Sent to "${group.name}".`,
-            });
-            await db
-              .collection("activity")
-              .add({
-                title: "Sent a message to a group",
-                detail: `${group.name}: "${groupSend.message.slice(0, 60)}"`,
-                type: "ok",
-                createdAt: Date.now(),
-              })
-              .catch(() => {});
+            if (!group) {
+              const notFoundText = `I couldn't find a group called "${groupSend.groupNameRaw}" that I'm a member of.`;
+              await activeSock.sendMessage(remoteJid, { text: notFoundText });
+              remember(remoteJid, "assistant", notFoundText);
+            } else if (groupSend.due) {
+              const dueAt = groupSend.due.getTime();
+              console.log(
+                `[group-send] scheduling for ${group.name} (${group.jid}) at ${new Date(dueAt).toISOString()} (in ${Math.round((dueAt - Date.now()) / 1000)}s)`
+              );
+              await scheduleMessage({
+                type: "group",
+                targetJid: group.jid,
+                targetLabel: group.name,
+                message: groupSend.message,
+                dueAt,
+                createdBy: senderJid,
+              });
+              const scheduledText = `Scheduled — I'll message "${group.name}" on ${formatDue(groupSend.due)}.`;
+              await activeSock.sendMessage(remoteJid, { text: scheduledText });
+              remember(remoteJid, "assistant", scheduledText);
+            } else {
+              await activeSock.sendMessage(group.jid, { text: groupSend.message });
+              await ensureHistoryLoaded(group.jid);
+              remember(group.jid, "assistant", groupSend.message);
+              const sentText = `Sent to "${group.name}".`;
+              await activeSock.sendMessage(remoteJid, { text: sentText });
+              remember(remoteJid, "assistant", sentText);
+              await db
+                .collection("activity")
+                .add({
+                  title: "Sent a message to a group",
+                  detail: `${group.name}: "${groupSend.message.slice(0, 60)}"`,
+                  type: "ok",
+                  createdAt: Date.now(),
+                })
+                .catch(() => {});
+            }
+          } catch (err) {
+            console.error("Failed to handle group-send:", err);
+            const errText = "Something went wrong sending that to the group — please try again.";
+            await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
+            remember(remoteJid, "assistant", errText);
           }
         } else {
-          const reply = await askLeo(remoteJid, askText);
+          const reply = await askLeo(remoteJid);
           await activeSock.sendMessage(remoteJid, { text: reply });
           await db
             .collection("activity")
