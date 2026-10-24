@@ -1,90 +1,149 @@
 "use client";
 
-import { ListTodo, Users, Megaphone, Search } from "lucide-react";
+import { useState } from "react";
+import { ListTodo, Users, Megaphone, Search, CalendarClock } from "lucide-react";
 import CodeRainBackground from "@/components/CodeRainBackground";
-import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import StatCard from "@/components/StatCard";
 import ChatPanel from "@/components/ChatPanel";
 import ActivityFeed from "@/components/ActivityFeed";
+import ListPanel from "@/components/ListPanel";
+import VoicesPanel from "@/components/VoicesPanel";
+import HomeHero from "@/components/HomeHero";
+import BottomNav, { TabId } from "@/components/BottomNav";
+import { useMicPermission } from "@/hooks/useMicPermission";
+
+const TODO_ITEMS = [
+  { id: 1, title: "Follow up with 3 new leads", subtitle: "Meta Ads — Diploma in AI campaign", meta: "High", accent: "magenta" as const },
+  { id: 2, title: "Fix missing meta description", subtitle: "/courses/ai-diploma", meta: "SEO", accent: "amber" as const },
+  { id: 3, title: "Confirm pending LMS enrolment", subtitle: "[email protected]", meta: "Awaiting you", accent: "cyan" as const },
+  { id: 4, title: "Review ad CPA spike", subtitle: "Diploma campaign, +12% in 24h", meta: "Ads", accent: "violet" as const },
+  { id: 5, title: "Approve scheduled post", subtitle: "Instagram — 6:00 PM today", meta: "Events", accent: "green" as const },
+];
+
+const LEAD_ITEMS = [
+  { id: 1, title: "Nadeesha Perera", subtitle: "Diploma in AI — Meta Lead Ad", meta: "2m ago", accent: "magenta" as const },
+  { id: 2, title: "Kavindu Silva", subtitle: "Diploma in AI — Meta Lead Ad", meta: "18m ago", accent: "magenta" as const },
+  { id: 3, title: "Ishara Fernando", subtitle: "Short Course — Website form", meta: "1h ago", accent: "cyan" as const },
+];
+
+const AD_ITEMS = [
+  { id: 1, title: "Pause or refresh creative", subtitle: "Diploma in AI — CPA up 12% in 24h", meta: "Suggested", accent: "amber" as const },
+  { id: 2, title: "Increase budget +20%", subtitle: "Short Course — CTR trending up", meta: "Suggested", accent: "green" as const },
+];
+
+const SEO_ITEMS = [
+  { id: 1, title: "Missing meta description", subtitle: "/courses/ai-diploma", meta: "Fix now", accent: "amber" as const },
+];
+
+const EVENT_ITEMS = [
+  { id: 1, title: "Open house — campus tour", subtitle: "Tomorrow, 10:00 AM", meta: "Event", accent: "cyan" as const },
+  { id: 2, title: "Scheduled Instagram post", subtitle: "Today, 6:00 PM", meta: "Post", accent: "violet" as const },
+];
 
 export default function Home() {
+  const [tab, setTab] = useState<TabId>("home");
+  const [lastHeard, setLastHeard] = useState<string | null>(null);
+  const mic = useMicPermission();
+
   return (
-    <div className="relative flex min-h-screen w-full gap-4 p-4">
+    <div className="relative flex min-h-screen w-full flex-col gap-4 p-4">
       <CodeRainBackground />
 
-      <Sidebar />
+      <Topbar />
 
-      <div className="flex flex-1 flex-col gap-4">
-        <Topbar />
-
-        <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
+      <main className="mx-auto w-full max-w-5xl flex-1">
+        {tab === "home" && (
           <div className="flex flex-col gap-4">
+            <HomeHero
+              micState={mic.state}
+              onRequestMic={mic.request}
+              onHeardCommand={setLastHeard}
+            />
+
+            {lastHeard ? (
+              <div className="fade-up rounded-xl border border-panel-border bg-white/[0.02] px-4 py-2 text-center text-xs text-muted">
+                Heard: <span className="text-foreground">&quot;{lastHeard}&quot;</span>
+              </div>
+            ) : null}
+
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <StatCard
-                label="To-Do Today"
-                value="5"
-                delta="2 new"
-                icon={ListTodo}
-                accent="cyan"
-              />
-              <StatCard
-                label="New Leads"
-                value="3"
-                delta="+3 today"
-                icon={Users}
-                accent="violet"
-              />
-              <StatCard
-                label="Ad Alerts"
-                value="2"
-                delta="CPA +12%"
-                trend="down"
-                icon={Megaphone}
-                accent="magenta"
-              />
-              <StatCard
-                label="SEO Issues"
-                value="1"
-                delta="-4 this week"
-                icon={Search}
-                accent="green"
-              />
+              <StatCard label="To-Do Today" value="5" delta="2 new" icon={ListTodo} accent="cyan" />
+              <StatCard label="New Leads" value="3" delta="+3 today" icon={Users} accent="violet" />
+              <StatCard label="Ad Alerts" value="2" delta="CPA +12%" trend="down" icon={Megaphone} accent="magenta" />
+              <StatCard label="SEO Issues" value="1" delta="-4 this week" icon={Search} accent="green" />
             </div>
 
-            <div className="glass-panel flex-1 rounded-2xl p-5">
+            <div className="glass-panel rounded-2xl p-5">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-foreground">
-                  Today&apos;s briefing
-                </h2>
-                <span className="font-mono text-[10px] text-muted">
-                  generated by LEO · model router
-                </span>
+                <h2 className="text-sm font-semibold text-foreground">Today&apos;s briefing</h2>
+                <span className="font-mono text-[10px] text-muted">generated by LEO · model router</span>
               </div>
               <p className="text-sm leading-relaxed text-muted">
                 Good morning. Since the last heartbeat, I found{" "}
-                <span className="text-foreground">2 new leads</span> from the
-                Meta Ads diploma campaign,{" "}
-                <span className="text-foreground">1 SEO fix</span> on the AI
-                diploma course page, and{" "}
-                <span className="text-foreground">1 LMS enrolment</span>{" "}
-                waiting on your confirmation. Everything else is on schedule —
-                no upcoming events in the next 24 hours need action from you
-                yet.
+                <span className="text-foreground">2 new leads</span> from the Meta Ads diploma
+                campaign, <span className="text-foreground">1 SEO fix</span> on the AI diploma
+                course page, and <span className="text-foreground">1 LMS enrolment</span> waiting
+                on your confirmation.
               </p>
             </div>
-          </div>
 
-          <div className="flex flex-col gap-4">
-            <div className="h-[420px] lg:h-[55%]">
-              <ChatPanel />
-            </div>
-            <div className="flex-1">
+            <div className="h-72">
               <ActivityFeed />
             </div>
           </div>
-        </div>
-      </div>
+        )}
+
+        {tab === "chat" && (
+          <div className="h-[70vh]">
+            <ChatPanel />
+          </div>
+        )}
+
+        {tab === "todo" && (
+          <div className="h-[70vh]">
+            <ListPanel title="To-Do Today" subtitle="Generated from everything LEO found" icon={ListTodo} items={TODO_ITEMS} />
+          </div>
+        )}
+
+        {tab === "leads" && (
+          <div className="h-[70vh]">
+            <ListPanel title="Leads" subtitle="Captured from Meta Ads and the website" icon={Users} items={LEAD_ITEMS} />
+          </div>
+        )}
+
+        {tab === "ads" && (
+          <div className="h-[70vh]">
+            <ListPanel title="Ad Suggestions" subtitle="Reviewed against performance thresholds" icon={Megaphone} items={AD_ITEMS} />
+          </div>
+        )}
+
+        {tab === "seo" && (
+          <div className="h-[70vh]">
+            <ListPanel title="SEO Health" subtitle="Issues found on the last crawl" icon={Search} items={SEO_ITEMS} />
+          </div>
+        )}
+
+        {tab === "events" && (
+          <div className="h-[70vh]">
+            <ListPanel title="Upcoming Events" subtitle="From the shared calendar and post schedule" icon={CalendarClock} items={EVENT_ITEMS} />
+          </div>
+        )}
+
+        {tab === "log" && (
+          <div className="h-[70vh]">
+            <ActivityFeed />
+          </div>
+        )}
+
+        {tab === "voices" && (
+          <div className="h-[70vh]">
+            <VoicesPanel micState={mic.state} onRequestMic={mic.request} />
+          </div>
+        )}
+      </main>
+
+      <BottomNav active={tab} onChange={setTab} />
     </div>
   );
 }
