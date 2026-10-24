@@ -2,7 +2,17 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { ShieldCheck, Smartphone, Link2, Unlink, AlertTriangle, CheckCircle2 } from "lucide-react";
+import {
+  ShieldCheck,
+  Smartphone,
+  Link2,
+  Unlink,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  Gauge,
+  RefreshCw,
+} from "lucide-react";
 import {
   subscribeWhatsAppStatus,
   requestWhatsAppLink,
@@ -10,6 +20,13 @@ import {
   WhatsAppStatus,
 } from "@/lib/whatsapp";
 import { firebaseEnabled } from "@/lib/firebase";
+
+type ProviderStatus = { ok: boolean; message: string; detail?: string };
+type ProviderStatusResponse = {
+  openrouter: ProviderStatus;
+  gemini: ProviderStatus;
+  checkedAt: number;
+};
 
 const STATUS_COPY: Record<WhatsAppStatus["status"], { label: string; color: string }> = {
   disconnected: { label: "Not linked", color: "var(--muted)" },
@@ -22,11 +39,26 @@ const STATUS_COPY: Record<WhatsAppStatus["status"], { label: string; color: stri
 export default function AdminPanel() {
   const [status, setStatus] = useState<WhatsAppStatus | null>(null);
   const [requesting, setRequesting] = useState(false);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatusResponse | null>(null);
+  const [checkingProviders, setCheckingProviders] = useState(false);
 
   useEffect(() => subscribeWhatsAppStatus(setStatus), []);
 
   const current = status?.status ?? "disconnected";
   const copy = STATUS_COPY[current];
+
+  async function checkProviders() {
+    setCheckingProviders(true);
+    try {
+      const res = await fetch("/api/admin/provider-status");
+      const data: ProviderStatusResponse = await res.json();
+      setProviderStatus(data);
+    } catch {
+      setProviderStatus(null);
+    } finally {
+      setCheckingProviders(false);
+    }
+  }
 
   async function handleLink() {
     setRequesting(true);
@@ -142,6 +174,62 @@ export default function AdminPanel() {
         The WhatsApp connection is handled by a separate always-on worker
         (not this website) — this panel only shows its live status and
         sends it link/unlink requests via Firestore.
+      </div>
+
+      <div className="rounded-xl border border-panel-border bg-white/[0.02] p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Gauge size={16} className="text-muted" />
+            <h3 className="text-sm font-medium text-foreground">
+              AI provider keys
+            </h3>
+          </div>
+          <button
+            onClick={checkProviders}
+            disabled={checkingProviders}
+            className="flex items-center gap-1.5 rounded-lg bg-accent-cyan/15 px-3 py-1.5 text-xs font-medium text-accent-cyan hover:bg-accent-cyan/25 disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={checkingProviders ? "animate-spin" : ""} />
+            {checkingProviders ? "Checking…" : "Check now"}
+          </button>
+        </div>
+
+        {!providerStatus ? (
+          <p className="text-xs text-muted">
+            Runs a real, minimal request against each provider to confirm the
+            key works and show whether it&apos;s rate-limited.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {(
+              [
+                ["OpenRouter (free models)", providerStatus.openrouter],
+                ["Gemini", providerStatus.gemini],
+              ] as const
+            ).map(([label, p]) => (
+              <div
+                key={label}
+                className="flex items-start gap-2 rounded-lg border border-panel-border bg-white/[0.02] px-3 py-2"
+              >
+                {p.ok ? (
+                  <CheckCircle2 size={14} className="mt-0.5 flex-shrink-0 text-accent-green" />
+                ) : (
+                  <XCircle size={14} className="mt-0.5 flex-shrink-0 text-accent-magenta" />
+                )}
+                <div>
+                  <p className="text-xs font-medium text-foreground">{label}</p>
+                  <p className="text-[11px] text-muted">
+                    {p.message}
+                    {p.detail ? ` · ${p.detail}` : ""}
+                  </p>
+                </div>
+              </div>
+            ))}
+            <p className="font-mono text-[10px] text-muted/70">
+              Checked {new Date(providerStatus.checkedAt).toLocaleTimeString()}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
