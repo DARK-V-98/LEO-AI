@@ -126,26 +126,12 @@ async function tryGemini(
   return null;
 }
 
-// Sinhala Unicode block.
-const SINHALA_PATTERN = /[඀-෿]/;
-
-// "Singlish" — Sinhala written phonetically in Latin letters, which most
-// people here actually type day-to-day ("kohomada", "mokakda", "oyata
-// kiyanna"). None of these words have an everyday English meaning, so
-// matching any one of them is a reliable signal, unlike short ambiguous
-// ones (e.g. "ow", "ela") which were deliberately left out.
-const SINGLISH_PATTERN =
-  /\b(mokakda|mokada|kohomada|kohedada|kauda|kawda|kiyanna|kiyala|karanna|karala|denna|dෙන්න|oyata|oyage|oyaata|apita|apita|puluwanda|puluwan|baha|epaa|epa|harima|godak|wenawada|wenawa|innawada|innawa|yanawada|yanna|enawada|enna|thiyenawa|nathuwa|nemei|thamai|monawada|monawa|ayubowan|machang|hondatama|hodatama|hondai|hodai|aiyo|mehema|monada|kelinma|hithanne|hitanne|puluwannam)\b/i;
-
-function looksSinhala(text: string): boolean {
-  return SINHALA_PATTERN.test(text) || SINGLISH_PATTERN.test(text);
-}
-
-/** Tries free-tier OpenRouter models first, falls back to Gemini, then a
- * generic offline reply so the chat never just breaks. For Sinhala — native
- * script or "Singlish" (Sinhala typed phonetically in English letters) —
- * Gemini goes first instead: the free OpenRouter models are noticeably
- * weaker at both than Gemini is. */
+/** Gemini goes first for every message, not just detected Sinhala/Singlish
+ * ones — most of this team's day-to-day chat is in Sinhala or Singlish,
+ * and the free OpenRouter models are noticeably worse at both than Gemini
+ * is, so there's no real upside to trying them first anymore. OpenRouter
+ * is only the fallback when Gemini itself is unavailable or out of quota,
+ * and a generic offline reply after that so the chat never just breaks. */
 export async function generateReply(
   history: ChatMessage[],
   context?: string,
@@ -167,20 +153,11 @@ export async function generateReply(
     return fromGemini ?? "I couldn't process that image/voice message right now — try again shortly.";
   }
 
-  const lastUserMessage = [...history].reverse().find((m) => m.role === "user");
-  const isSinhala = lastUserMessage ? looksSinhala(lastUserMessage.content) : false;
+  const fromGemini = await tryGemini(messages);
+  if (fromGemini) return fromGemini;
 
-  if (isSinhala) {
-    const fromGemini = await tryGemini(messages);
-    if (fromGemini) return fromGemini;
-    const fromOpenRouter = await tryOpenRouter(messages);
-    if (fromOpenRouter) return fromOpenRouter;
-  } else {
-    const fromOpenRouter = await tryOpenRouter(messages);
-    if (fromOpenRouter) return fromOpenRouter;
-    const fromGemini = await tryGemini(messages);
-    if (fromGemini) return fromGemini;
-  }
+  const fromOpenRouter = await tryOpenRouter(messages);
+  if (fromOpenRouter) return fromOpenRouter;
 
   return "I'm having trouble reaching my model providers right now — try again in a moment.";
 }

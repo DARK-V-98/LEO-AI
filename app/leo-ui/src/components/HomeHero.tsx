@@ -219,14 +219,16 @@ export default function HomeHero({
         <LeoOrb mood={mood} size={orbSize} showLabel hud freeRoam />
       </div>
 
-      <div className="pointer-events-none relative z-10 flex flex-col items-center gap-2">
-        <h1 className="mt-2 text-xl font-semibold tracking-wide text-foreground">
-          LEO
-        </h1>
-        <p className="font-mono text-[11px] text-muted">
-          SmartLabs NeuraLink · always on
-        </p>
-      </div>
+      {!fullSpace ? (
+        <div className="pointer-events-none relative z-10 flex flex-col items-center gap-2">
+          <h1 className="mt-2 text-xl font-semibold tracking-wide text-foreground">
+            LEO
+          </h1>
+          <p className="font-mono text-[11px] text-muted">
+            SmartLabs NeuraLink · always on
+          </p>
+        </div>
+      ) : null}
 
       {greeting ? (
         <div className="fade-up max-w-md rounded-2xl border border-accent-cyan/30 bg-accent-cyan/5 px-4 py-2 text-center text-xs leading-relaxed text-foreground">
@@ -246,7 +248,7 @@ export default function HomeHero({
         </a>
       ) : null}
 
-      {!micGateSeen && micState === "unset" ? (
+      {fullSpace ? null : !micGateSeen && micState === "unset" ? (
         <div className="w-full max-w-sm rounded-xl border border-accent-amber/30 bg-accent-amber/5 p-4 text-center">
           <div className="mb-1 flex items-center justify-center gap-2 text-xs font-medium text-accent-amber">
             <ShieldCheck size={14} />
