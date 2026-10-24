@@ -37,6 +37,8 @@ const STATUS_DOC = db.collection("whatsapp").doc("status");
 const COMMANDS = db.collection("whatsappCommands");
 const OUTBOX = db.collection("whatsappOutbox");
 const SCHEDULED = db.collection("scheduledMessages");
+const KNOWLEDGE = db.collection("companyKnowledge");
+const PEOPLE = db.collection("people");
 
 const AUTH_DIR = process.env.AUTH_DIR || "./auth_info";
 const logger = pino({ level: process.env.LOG_LEVEL || "warn" });
@@ -76,16 +78,113 @@ function remember(jid, role, content) {
   chatMemory.set(jid, history);
 }
 
+// --- Company knowledge & people memory -------------------------------------
+// Deliberately conservative about what gets remembered: only (a) facts
+// someone explicitly asks LEO to remember, and (b) a person's own name/role
+// when they introduce themselves — never arbitrary message content from a
+// private chat. Company facts are shared across every chat (they're not
+// private); a person's name/role is only ever surfaced back to that same
+// person, never mentioned to anyone else.
+
+const SEED_KNOWLEDGE = [
+  "SmartLabs is an educational institute.",
+  "Ms. Lahiruka is the Managing Director and owner of SmartLabs.",
+  "Vishwa is the software engineer and developer who built SmartLabs' AI (LEO himself), websites, and systems.",
+];
+
+async function seedKnowledgeIfEmpty() {
+  try {
+    const snap = await KNOWLEDGE.limit(1).get();
+    if (!snap.empty) return;
+    const batch = db.batch();
+    for (const fact of SEED_KNOWLEDGE) {
+      batch.set(KNOWLEDGE.doc(), { fact, addedBy: "system", source: "seed", createdAt: Date.now() });
+    }
+    await batch.commit();
+    console.log("Seeded initial company knowledge.");
+  } catch (err) {
+    console.error("Failed to seed company knowledge:", err);
+  }
+}
+
+async function getCompanyContext(senderJid) {
+  const lines = [];
+  try {
+    const knowledgeSnap = await KNOWLEDGE.get();
+    const facts = knowledgeSnap.docs.map((d) => d.data().fact).filter(Boolean);
+    if (facts.length > 0) {
+      lines.push("Company facts you already know (don't ask to be told these again):");
+      for (const f of facts) lines.push(`- ${f}`);
+    }
+
+    const personDoc = await PEOPLE.doc(senderJid).get();
+    if (personDoc.exists) {
+      const p = personDoc.data();
+      lines.push(
+        `\nYou're talking to ${p.name}${p.role ? `, ${p.role}` : ""}. Address them by name naturally, don't re-ask who they are.`
+      );
+    }
+  } catch (err) {
+    console.error("Failed to load company context:", err);
+  }
+  return lines.join("\n");
+}
+
+// "remember [that] <fact>" / "remember: <fact>" — an explicit, deliberate
+// way to teach LEO something, rather than guessing at what's worth keeping.
+const REMEMBER_PATTERN = /^\s*remember\s*(?:that)?\s*[:\-]?\s*(.+)/i;
+
+async function rememberFact(fact, addedBy, source) {
+  await KNOWLEDGE.add({ fact, addedBy, source, createdAt: Date.now() });
+}
+
+// Self-introduction — "I'm Vishwa, the software engineer", "my name is
+// Lahiruka", etc. Stored per-JID, only ever shown back to that same person.
+const INTRO_PATTERN = /\b(?:i'?m|i am|my name is|this is)\s+([A-Z][a-zA-Z]{1,30})\b[,:]?\s*(.*)/i;
+
+async function maybeLearnIntroduction(jid, text) {
+  const m = text.match(INTRO_PATTERN);
+  if (!m) return;
+  const name = m[1].trim();
+  const role = m[2].trim().replace(/^(the|and|,)\s*/i, "").slice(0, 150) || null;
+  try {
+    await PEOPLE.doc(jid).set(
+      { name, ...(role ? { role } : {}), jid, updatedAt: Date.now() },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error("Failed to save person info:", err);
+  }
+}
+
+// Anchored/specific on purpose — a bare "help" inside a normal sentence
+// ("can you help me write an email") should go to the AI, not this menu.
+const HELP_PATTERN =
+  /^(?:help|commands)[.!?]?$|\bwhat (?:can you do|are your commands|commands do you have)\b|\blist (?:your )?commands\b/i;
+
+const HELP_TEXT = [
+  "Here's what I can do here on WhatsApp:",
+  "",
+  "• Just talk to me normally — ask questions, request a task, etc.",
+  '• "poster: <description>" or "flyer of <description>" — I’ll generate an image (attach or reply to a photo to use it as a style reference).',
+  '• "remind me in 20 minutes to <note>" or "remind me tomorrow at 9am to <note>" — I’ll DM you back at that time.',
+  '• "tell group <name>: <message>" — sends to that group now, or schedules it if you include a time.',
+  '• "remember that <fact>" — teaches me something to keep in mind going forward.',
+  "",
+  "In the company group, say “Leo” so I know you're talking to me.",
+].join("\n");
+
 async function askLeo(jid, text) {
   remember(jid, "user", text);
   if (!WEB_BASE_URL) {
     return "I'm not fully set up to chat here yet — ask the team to finish the WhatsApp setup (LEO_WEB_BASE_URL).";
   }
   try {
+    const context = await getCompanyContext(jid);
     const res = await fetch(`${WEB_BASE_URL}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ history: chatMemory.get(jid) }),
+      body: JSON.stringify({ history: chatMemory.get(jid), context }),
     });
     const data = await res.json();
     const reply = data?.reply || "Sorry, I didn't catch that — could you say it again?";
@@ -331,11 +430,32 @@ function attachMessageHandler(activeSock) {
 
         await activeSock.sendPresenceUpdate("composing", remoteJid).catch(() => {});
 
-        const posterMatch = askText.match(POSTER_PATTERN);
-        const reminder = parseReminder(askText);
-        const groupSend = !reminder ? parseGroupSend(askText) : null;
+        // Learn who's speaking, silently — never changes what gets replied.
+        maybeLearnIntroduction(senderJid, askText).catch(() => {});
 
-        if (posterMatch) {
+        const rememberMatch = askText.match(REMEMBER_PATTERN);
+        const posterMatch = !rememberMatch ? askText.match(POSTER_PATTERN) : null;
+        const reminder = !rememberMatch ? parseReminder(askText) : null;
+        const groupSend = !rememberMatch && !reminder ? parseGroupSend(askText) : null;
+
+        if (HELP_PATTERN.test(askText)) {
+          await activeSock.sendMessage(remoteJid, { text: HELP_TEXT });
+        } else if (rememberMatch) {
+          const fact = rememberMatch[1].trim();
+          await rememberFact(fact, senderJid, isGroup ? "group" : "dm");
+          await activeSock.sendMessage(remoteJid, {
+            text: `Got it — I'll remember that: "${fact}".`,
+          });
+          await db
+            .collection("activity")
+            .add({
+              title: "Learned a new fact",
+              detail: fact.slice(0, 60),
+              type: "ok",
+              createdAt: Date.now(),
+            })
+            .catch(() => {});
+        } else if (posterMatch) {
           const prompt = posterMatch[1].trim();
           try {
             const referenceImage = await downloadReferenceImage(activeSock, msg);
@@ -580,6 +700,7 @@ OUTBOX.orderBy("createdAt", "asc").onSnapshot((snap) => {
 });
 
 await setStatus({ status: "disconnected" });
+await seedKnowledgeIfEmpty();
 console.log("LEO WhatsApp bridge is up. Waiting for a link request from the dashboard…");
 
 // If credentials already exist from a previous run (e.g. a restart, not a

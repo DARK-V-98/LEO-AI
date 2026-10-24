@@ -53,13 +53,38 @@ dates, not the AI — so these are fast and don't cost an AI call):
   for then instead. LEO only matches against groups he's actually a
   member of; if the name doesn't match, he says so rather than guessing.
 
-These are checked in this order: poster, then reminder, then group-send,
-then falls through to a normal AI chat reply — so a message needs to
-clearly match one of the patterns above to trigger it instead of just
-being answered conversationally. Reminders and scheduled group messages
-are stored in Firestore (`scheduledMessages`) and a 20-second-interval
-check inside this same worker sends them once due — no separate cron job
-needed.
+- **"remember that \<fact\>"** — e.g. `remember that our office closes at
+  5pm on Fridays` — explicitly teaches LEO something. It gets added to
+  Firestore (`companyKnowledge`) and from then on is included as context
+  in *every* chat, group and DM alike, so he doesn't need to be told
+  again. This is the deliberate, safe way to grow what he knows — he does
+  **not** passively log or learn from ordinary conversation content,
+  especially not from private DMs, to avoid one person's private chat
+  leaking into what LEO says to someone else.
+- **Introducing yourself** — say something like "I'm Vishwa, the software
+  engineer and developer of the AI and systems" and he remembers your
+  name/role (stored per WhatsApp number in Firestore's `people`
+  collection) and will address you by name afterwards — only ever back
+  to you, never mentioned to anyone else's chat.
+- **"help" / "commands" / "what can you do"** — sends back the current
+  list of everything above. Deliberately a fixed, hand-written message
+  (not asked of the AI) so it can never drift out of sync with what's
+  actually implemented.
+
+`companyKnowledge` starts pre-seeded (on first boot, if empty) with:
+SmartLabs is an educational institute; Ms. Lahiruka is the Managing
+Director and owner; Vishwa is the software engineer who built LEO,
+the websites, and the other systems. Add more anytime with "remember
+that ...", or edit the `companyKnowledge` collection directly in the
+Firebase console.
+
+These are checked in this order: help, remember, poster, reminder, then
+group-send, then falls through to a normal AI chat reply — so a message
+needs to clearly match one of the patterns above to trigger it instead of
+just being answered conversationally. Reminders and scheduled group
+messages are stored in Firestore (`scheduledMessages`) and a
+20-second-interval check inside this same worker sends them once due —
+no separate cron job needed.
 
 ## 1. Get a Firebase service account key
 

@@ -110,9 +110,12 @@ const SINHALA_PATTERN = /[඀-෿]/;
  * generic offline reply so the chat never just breaks. For Sinhala, Gemini
  * goes first instead — the free OpenRouter models are noticeably weaker at
  * it than Gemini is. */
-export async function generateReply(history: ChatMessage[]): Promise<string> {
+export async function generateReply(history: ChatMessage[], context?: string): Promise<string> {
+  const systemContent = context?.trim()
+    ? `${SYSTEM_PROMPT}\n\n${context.trim()}`
+    : SYSTEM_PROMPT;
   const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemContent },
     ...history,
   ];
 
