@@ -5,6 +5,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export type WakeState = "idle" | "listening" | "awake" | "unsupported" | "denied";
 export type VoiceLang = "en-US" | "si-LK";
 
+// Errors the browser can report that aren't a flat permission denial —
+// these used to be silently swallowed, so the UI kept showing "listening"
+// while the mic had actually stopped capturing anything at all.
+const SILENT_RETRY_ERRORS = new Set(["no-speech", "aborted"]);
+
 const WAKE_PATTERN_EN = /\bhey\s+leo\b|\bleo\b/i;
 // Best-effort Sinhala phonetic spellings of "Leo" — speech recognition
 // transcribes names inconsistently, so this is approximate, not exact.
@@ -31,6 +36,7 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
   const [state, setState] = useState<WakeState>("idle");
   const [enabled, setEnabled] = useState(false);
   const [lastTranscript, setLastTranscript] = useState("");
+  const [micErrorKind, setMicErrorKind] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const awakeRef = useRef(false);
   const collectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,6 +67,7 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
     clearCollectTimer();
     awakeRef.current = false;
     setState("idle");
+    setMicErrorKind(null);
   }, []);
 
   const start = useCallback(() => {
@@ -68,6 +75,7 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
       setState("unsupported");
       return;
     }
+    setMicErrorKind(null);
     const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition!;
     const recognition = new Ctor();
     recognition.continuous = true;
@@ -83,6 +91,7 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
     };
 
     recognition.onresult = (event) => {
+      setMicErrorKind(null);
       let transcript = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         transcript += event.results[i][0].transcript;
@@ -103,10 +112,21 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
     };
 
     recognition.onerror = (event) => {
-      const err = (event as unknown as { error?: string }).error;
+      const err = (event as unknown as { error?: string }).error ?? "unknown";
       if (err === "not-allowed" || err === "service-not-allowed") {
         setState("denied");
         setEnabled(false);
+        return;
+      }
+      // "no-speech"/"aborted" are routine in continuous mode (the browser
+      // times a listening window out with nobody talking) — onend already
+      // restarts for those. Anything else (most commonly "audio-capture",
+      // meaning the mic device itself dropped out or got grabbed by
+      // another app/tab) used to be silently ignored, which left the UI
+      // saying "listening" while nothing was actually being captured.
+      if (!SILENT_RETRY_ERRORS.has(err)) {
+        console.warn(`[LEO wake word] speech recognition error: ${err}`);
+        setMicErrorKind(err);
       }
     };
 
@@ -168,5 +188,5 @@ export function useWakeWord(onWake: (command: string) => void, lang: VoiceLang =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled]);
 
-  return { state, enabled, toggle, pause, resume, lastTranscript, supported };
+  return { state, enabled, toggle, pause, resume, lastTranscript, supported, micErrorKind };
 }

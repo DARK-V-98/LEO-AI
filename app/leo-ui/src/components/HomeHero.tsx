@@ -103,6 +103,7 @@ export default function HomeHero({
     resume,
     supported,
     lastTranscript,
+    micErrorKind,
   } = useWakeWord((command) => respondRef.current(command), voiceLang);
 
   async function identifySpeaker(): Promise<string | undefined> {
@@ -313,15 +314,21 @@ export default function HomeHero({
             {enabled ? "Listening for “Leo” — tap to stop" : "Tap to let LEO listen for his name"}
           </button>
 
-          <span className="flex items-center gap-1 font-mono text-[10px] text-muted">
-            <Ear size={11} className={enabled ? "text-accent-green" : ""} />
+          <span
+            className={`flex items-center gap-1 font-mono text-[10px] ${
+              micErrorKind ? "text-accent-magenta" : "text-muted"
+            }`}
+          >
+            <Ear size={11} className={enabled && !micErrorKind ? "text-accent-green" : ""} />
             {!supported
               ? "Voice wake isn't supported in this browser"
-              : wakeState === "awake"
-                ? "Awake — go ahead"
-                : enabled
-                  ? "Always on, say “Leo” anytime"
-                  : "Wake-word listening is off"}
+              : micErrorKind
+                ? `Mic stopped (${micErrorKind}) — check your microphone, then tap to restart`
+                : wakeState === "awake"
+                  ? "Awake — go ahead"
+                  : enabled
+                    ? "Always on, say “Leo” anytime"
+                    : "Wake-word listening is off"}
           </span>
 
           {enabled ? (
