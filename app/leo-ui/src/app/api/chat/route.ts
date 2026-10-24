@@ -17,6 +17,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "history is required" }, { status: 400 });
   }
 
-  const reply = await generateReply(history, context, attachments);
-  return NextResponse.json({ reply });
+  const result = await generateReply(history, context, attachments);
+  // `reply` stays a plain string — every existing caller (the web chat UI,
+  // the WhatsApp bridge's askLeo) reads it that way. `actions` is new and
+  // additive: only a caller that knows to look (currently just the bridge,
+  // which has the Firestore Admin access needed to actually act on them)
+  // does anything with it.
+  return NextResponse.json({ reply: result.text, actions: result.actions });
 }
