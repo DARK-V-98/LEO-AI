@@ -168,11 +168,20 @@ async function downloadReferenceImage(activeSock, msg) {
   }
 }
 
+// Times said in chat ("at 5pm", "tomorrow at 9am") mean local Sri Lanka
+// time, not the server's — this worker runs in UTC on Railway, and without
+// this, "5pm" would get scheduled for 5pm UTC (10:30pm in Colombo), which
+// is exactly why reminders looked broken/wrong before this fix.
+const LOCAL_TZ_OFFSET_MINUTES = Number(process.env.REMINDER_TZ_OFFSET_MINUTES ?? 330); // UTC+5:30
+function chronoRef() {
+  return { instant: new Date(), timezone: LOCAL_TZ_OFFSET_MINUTES };
+}
+
 // --- Reminders ("remind me ... at/in ...") ---------------------------------
 function parseReminder(text) {
   if (!/\bremind me\b/i.test(text)) return null;
 
-  const results = chrono.parse(text, new Date());
+  const results = chrono.parse(text, chronoRef(), { forwardDate: true });
   if (results.length === 0) return null; // no time found — caller asks for one
 
   const match = results[0];
@@ -199,7 +208,7 @@ function parseGroupSend(text) {
   let message = m[2].trim();
   let due = null;
 
-  const timeResults = chrono.parse(message, new Date());
+  const timeResults = chrono.parse(message, chronoRef(), { forwardDate: true });
   if (timeResults.length > 0) {
     const tm = timeResults[0];
     due = tm.start.date();
@@ -262,6 +271,7 @@ function formatDue(date) {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: "Asia/Colombo",
   });
 }
 
