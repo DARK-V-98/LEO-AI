@@ -22,12 +22,18 @@ const SYSTEM_PROMPT =
   "Diploma open house, blue theme') and it will be generated and sent " +
   "back automatically — don't just say you can't do it.";
 
-// Free-tier OpenRouter models, tried in order until one responds.
+// Free-tier OpenRouter models, tried in order until one responds. Picked
+// from a live /api/admin/openrouter-models check (not from training-data
+// memory, which predates all of these releases) and researched before
+// picking: strongest general-purpose free models first, lighter/faster
+// ones as quick fallbacks, OpenRouter's own auto-router as a last resort
+// before falling through to Gemini.
 const OPENROUTER_MODELS = [
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "google/gemma-3-27b-it:free",
-  "mistralai/mistral-small-3.2-24b-instruct:free",
-  "qwen/qwen3-14b:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "google/gemma-4-31b-it:free",
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+  "google/gemma-4-26b-a4b-it:free",
+  "openrouter/free",
 ];
 
 async function tryOpenRouter(messages: ChatMessage[]): Promise<string | null> {

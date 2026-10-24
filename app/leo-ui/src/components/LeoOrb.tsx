@@ -51,6 +51,22 @@ function makeDust(count: number): Dust[] {
   }));
 }
 
+// A halo of orbiting glyphs around the sphere — the "codes" half of
+// "codes and dots", meant to read as a higher-order entity built out of
+// live data rather than a simple glowing ball.
+type CodeBit = { angle: number; radius: number; speed: number; phase: number; char: string };
+const GLYPH_SET = "0101010101λΣΔ#%?".split("");
+
+function makeCodeRing(count: number): CodeBit[] {
+  return Array.from({ length: count }, () => ({
+    angle: Math.random() * Math.PI * 2,
+    radius: 1.55 + Math.random() * 0.55,
+    speed: (Math.random() * 0.006 + 0.0015) * (Math.random() < 0.5 ? -1 : 1),
+    phase: Math.random() * Math.PI * 2,
+    char: GLYPH_SET[Math.floor(Math.random() * GLYPH_SET.length)],
+  }));
+}
+
 export default function LeoOrb({
   mood = "idle",
   size = 180,
@@ -66,6 +82,7 @@ export default function LeoOrb({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointsRef = useRef<[number, number, number][]>([]);
   const dustRef = useRef<Dust[]>([]);
+  const codeRef = useRef<CodeBit[]>([]);
   const rotRef = useRef({ y: 0, x: 0.35 });
   const moodRef = useRef(mood);
   moodRef.current = mood;
@@ -74,6 +91,7 @@ export default function LeoOrb({
     const density = Math.max(320, Math.round(size * 3.4));
     pointsRef.current = fibonacciSphere(density);
     dustRef.current = makeDust(Math.max(24, Math.round(size / 6)));
+    codeRef.current = makeCodeRing(Math.max(14, Math.round(size / 10)));
   }, [size]);
 
   useEffect(() => {
@@ -131,6 +149,23 @@ export default function LeoOrb({
         ctx!.fillStyle = `rgba(${r},${g},${b},${twinkle.toFixed(3)})`;
         ctx!.arc(px, py, 1 + twinkle, 0, Math.PI * 2);
         ctx!.fill();
+      }
+
+      // orbiting glyph halo — the "codes" layer, drawn beyond the dust ring
+      // so the entity reads as built out of live data, not just a glowing ball
+      ctx!.font = `${Math.max(9, size * 0.055)}px "Berkeley Mono", "JetBrains Mono", monospace`;
+      ctx!.textAlign = "center";
+      ctx!.textBaseline = "middle";
+      for (const c of codeRef.current) {
+        c.angle += c.speed;
+        if (Math.random() < 0.01) {
+          c.char = GLYPH_SET[Math.floor(Math.random() * GLYPH_SET.length)];
+        }
+        const twinkle = 0.2 + Math.abs(Math.sin(t * 1.1 + c.phase)) * 0.65;
+        const px = cx + Math.cos(c.angle) * R * c.radius;
+        const py = cy + Math.sin(c.angle) * R * c.radius * 0.72;
+        ctx!.fillStyle = `rgba(${r},${g},${b},${twinkle.toFixed(3)})`;
+        ctx!.fillText(c.char, px, py);
       }
 
       const cosY = Math.cos(rotRef.current.y);
