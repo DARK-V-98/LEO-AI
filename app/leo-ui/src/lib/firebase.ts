@@ -2,6 +2,7 @@
 
 import { initializeApp, getApps, type FirebaseOptions } from "firebase/app";
 import { getFirestore, type Firestore } from "firebase/firestore";
+import { getAuth, type Auth } from "firebase/auth";
 
 // All values come from NEXT_PUBLIC_* env vars so they can be set per
 // environment (local dev, staging, production) without touching code.
@@ -20,10 +21,12 @@ const firebaseConfig: FirebaseOptions = {
 export const firebaseEnabled = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 
 let db: Firestore | null = null;
+let auth: Auth | null = null;
 
 if (firebaseEnabled) {
   const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
   db = getFirestore(app);
+  auth = getAuth(app);
 }
 
-export { db };
+export { db, auth };
