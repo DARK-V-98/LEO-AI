@@ -1,18 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Bell, ChevronDown, Wifi, Languages } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Wifi, Languages, LogOut } from "lucide-react";
+import type { User } from "firebase/auth";
 import LeoOrb from "./LeoOrb";
 import { VoiceLang } from "@/hooks/useWakeWord";
+
+function initialsFor(user: User | null): string {
+  const source = user?.displayName || user?.email || "?";
+  const parts = source.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return source.slice(0, 2).toUpperCase();
+}
 
 export default function Topbar({
   voiceLang,
   onVoiceLangChange,
+  user,
+  onSignOut,
+  connectorsActive,
 }: {
   voiceLang: VoiceLang;
   onVoiceLangChange: (lang: VoiceLang) => void;
+  user: User | null;
+  onSignOut: () => void;
+  connectorsActive: number;
 }) {
   const [time, setTime] = useState<string>("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const tick = () => setTime(new Date().toLocaleTimeString());
@@ -20,6 +36,17 @@ export default function Topbar({
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [menuOpen]);
 
   return (
     <header className="glass-panel flex items-center justify-between rounded-2xl px-5 py-3">
@@ -43,8 +70,8 @@ export default function Topbar({
 
       <div className="flex items-center gap-4">
         <div className="hidden items-center gap-2 rounded-xl border border-panel-border px-3 py-1.5 text-xs text-muted md:flex">
-          <Wifi size={14} className="text-accent-cyan" />
-          4 connectors active
+          <Wifi size={14} className={connectorsActive > 0 ? "text-accent-green" : "text-muted"} />
+          {connectorsActive} connector{connectorsActive === 1 ? "" : "s"} active
         </div>
 
         <div
@@ -74,26 +101,41 @@ export default function Topbar({
           </button>
         </div>
 
-        <button className="relative rounded-xl border border-panel-border p-2 text-muted transition-colors hover:text-foreground">
-          <Bell size={16} />
-          <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-accent-magenta text-[9px] font-bold text-white">
-            6
-          </span>
-        </button>
-
-        <button className="flex items-center gap-2 rounded-xl border border-panel-border px-2 py-1.5 pr-3 text-sm text-foreground transition-colors hover:bg-white/5">
-          <div
-            className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold"
-            style={{
-              background:
-                "linear-gradient(135deg, var(--accent-violet), var(--accent-magenta))",
-            }}
+        <div ref={menuRef} className="relative">
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            className="flex items-center gap-2 rounded-xl border border-panel-border px-2 py-1.5 pr-3 text-sm text-foreground transition-colors hover:bg-white/5"
           >
-            TV
-          </div>
-          <span className="hidden text-xs sm:inline">Thimira</span>
-          <ChevronDown size={14} className="text-muted" />
-        </button>
+            <div
+              className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold"
+              style={{
+                background:
+                  "linear-gradient(135deg, var(--accent-violet), var(--accent-magenta))",
+              }}
+            >
+              {initialsFor(user)}
+            </div>
+            <span className="hidden max-w-[120px] truncate text-xs sm:inline">
+              {user?.displayName || user?.email || "Signed in"}
+            </span>
+            <ChevronDown size={14} className="text-muted" />
+          </button>
+
+          {menuOpen ? (
+            <div className="glass-panel fade-up absolute right-0 top-full z-30 mt-2 w-48 rounded-xl p-1.5">
+              <div className="px-2 py-1.5 text-[11px] text-muted truncate">
+                {user?.email}
+              </div>
+              <button
+                onClick={onSignOut}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-accent-magenta transition-colors hover:bg-accent-magenta/10"
+              >
+                <LogOut size={13} />
+                Sign out
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </header>
   );

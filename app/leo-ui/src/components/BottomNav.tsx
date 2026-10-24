@@ -11,6 +11,7 @@ import {
   CalendarClock,
   ScrollText,
   AudioLines,
+  ShieldCheck,
   LucideIcon,
 } from "lucide-react";
 
@@ -24,15 +25,16 @@ export type TabId =
   | "seo"
   | "events"
   | "log"
-  | "voices";
+  | "voices"
+  | "admin";
 
-const ITEMS: { id: TabId; label: string; icon: LucideIcon; badge?: number }[] = [
+const BASE_ITEMS: { id: TabId; label: string; icon: LucideIcon; badgeKey?: "todo" | "leads" | "ads" }[] = [
   { id: "home", label: "LEO", icon: Bot },
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "chat", label: "Chat", icon: MessageCircle },
-  { id: "todo", label: "To-Do", icon: ListTodo, badge: 5 },
-  { id: "leads", label: "Leads", icon: Users, badge: 3 },
-  { id: "ads", label: "Ads", icon: Megaphone, badge: 2 },
+  { id: "todo", label: "To-Do", icon: ListTodo, badgeKey: "todo" },
+  { id: "leads", label: "Leads", icon: Users, badgeKey: "leads" },
+  { id: "ads", label: "Ads", icon: Megaphone, badgeKey: "ads" },
   { id: "seo", label: "SEO", icon: Search },
   { id: "events", label: "Events", icon: CalendarClock },
   { id: "log", label: "Log", icon: ScrollText },
@@ -42,14 +44,23 @@ const ITEMS: { id: TabId; label: string; icon: LucideIcon; badge?: number }[] = 
 export default function BottomNav({
   active,
   onChange,
+  showAdmin = false,
+  badges,
 }: {
   active: TabId;
   onChange: (id: TabId) => void;
+  showAdmin?: boolean;
+  badges?: { todo?: number; leads?: number; ads?: number };
 }) {
+  const items = showAdmin
+    ? [...BASE_ITEMS, { id: "admin" as TabId, label: "Admin", icon: ShieldCheck }]
+    : BASE_ITEMS;
+
   return (
     <nav className="glass-panel sticky bottom-4 z-20 mx-auto flex w-full max-w-5xl items-center justify-between gap-1 overflow-x-auto rounded-2xl px-2 py-2">
-      {ITEMS.map(({ id, label, icon: Icon, badge }) => {
+      {items.map(({ id, label, icon: Icon, badgeKey }) => {
         const isActive = active === id;
+        const badge = badgeKey ? badges?.[badgeKey] : undefined;
         return (
           <button
             key={id}

@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { Mic, Send, ShieldCheck, Check, X, Volume2, VolumeX } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Mic, Send, ShieldCheck, Check, X, Volume2, VolumeX, MessageCircle } from "lucide-react";
 import LeoOrb, { LeoMood } from "./LeoOrb";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useDictation } from "@/hooks/useDictation";
 import { VoiceLang } from "@/hooks/useWakeWord";
+import { subscribeChatHistory, appendChatMessage } from "@/lib/chatHistory";
+import { logActivity } from "@/lib/companyData";
+import { firebaseEnabled } from "@/lib/firebase";
 
 type Message = {
   id: string;
@@ -17,36 +20,28 @@ type Message = {
   };
 };
 
-const INITIAL_MESSAGES: Message[] = [
-  {
-    id: "m1",
-    from: "leo",
-    text: "Morning, Thimira. Heartbeat check at 09:30 found 2 new leads, 1 SEO issue, and a pending LMS enrolment. Daily digest sent to WhatsApp.",
-  },
-  {
-    id: "m2",
-    from: "user",
-    text: "Go ahead and accept the new student in the LMS, then open YouTube and play our latest ad reel.",
-  },
-  {
-    id: "m3",
-    from: "leo",
-    text: "Got it. Before I touch anything outside this chat, I need your go-ahead for each action:",
-    confirm: {
-      action: "Accept student enrolment — [email protected]",
-      detail: "LMS admin account · irreversible action",
-    },
-  },
-];
-
-export default function ChatPanel({ voiceLang }: { voiceLang: VoiceLang }) {
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
+export default function ChatPanel({
+  voiceLang,
+  uid,
+}: {
+  voiceLang: VoiceLang;
+  uid: string | null;
+}) {
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [voiceOn, setVoiceOn] = useState(true);
   const { speak, cancel, speaking } = useSpeech();
   const dictation = useDictation(voiceLang);
   const listening = dictation.active;
+
+  useEffect(
+    () =>
+      subscribeChatHistory(uid, (history) =>
+        setMessages(history.map((m) => ({ id: m.id, from: m.from, text: m.text })))
+      ),
+    [uid]
+  );
 
   const mood: LeoMood = speaking
     ? "speaking"
@@ -56,43 +51,48 @@ export default function ChatPanel({ voiceLang }: { voiceLang: VoiceLang }) {
         ? "listening"
         : "idle";
 
+  const persisted = firebaseEnabled && Boolean(uid);
+
   async function send(overrideText?: string) {
     const text = (overrideText ?? input).trim();
     if (!text || thinking) return;
-
-    const nextMessages = [
-      ...messages,
-      { id: crypto.randomUUID(), from: "user" as const, text },
-    ];
-    setMessages(nextMessages);
     setInput("");
     setThinking(true);
+
+    const nextHistory = [
+      ...messages,
+      { id: "pending", from: "user" as const, text },
+    ].map((m) => ({ role: m.from === "user" ? "user" : "assistant", content: m.text }));
+
+    if (persisted) {
+      await appendChatMessage(uid, "user", text);
+    } else {
+      setMessages((m) => [...m, { id: crypto.randomUUID(), from: "user", text }]);
+    }
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          history: nextMessages.map((m) => ({
-            role: m.from === "user" ? "user" : "assistant",
-            content: m.text,
-          })),
-        }),
+        body: JSON.stringify({ history: nextHistory }),
       });
       const data = await res.json();
       const reply: string = data.reply ?? "Sorry, I didn't catch that — try again?";
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), from: "leo", text: reply },
-      ]);
+      if (persisted) {
+        await appendChatMessage(uid, "leo", reply);
+      } else {
+        setMessages((m) => [...m, { id: crypto.randomUUID(), from: "leo", text: reply }]);
+      }
       setThinking(false);
+      logActivity("Chat reply sent", text.length > 60 ? text.slice(0, 60) + "…" : text, "ok");
       if (voiceOn) await speak(reply);
     } catch {
       const reply = "I couldn't reach my systems just now — try again shortly.";
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), from: "leo", text: reply },
-      ]);
+      if (persisted) {
+        await appendChatMessage(uid, "leo", reply);
+      } else {
+        setMessages((m) => [...m, { id: crypto.randomUUID(), from: "leo", text: reply }]);
+      }
       setThinking(false);
       if (voiceOn) await speak(reply);
     }
@@ -162,6 +162,14 @@ export default function ChatPanel({ voiceLang }: { voiceLang: VoiceLang }) {
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+        {messages.length === 0 && !thinking ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted">
+            <MessageCircle size={20} className="opacity-50" />
+            <p className="text-xs">
+              Say hi to LEO, or type/talk what you need done.
+            </p>
+          </div>
+        ) : null}
         {messages.map((msg) => (
           <div
             key={msg.id}

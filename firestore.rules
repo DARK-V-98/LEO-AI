@@ -1,0 +1,85 @@
+rules_version = '2';
+
+// Deploy with: firebase deploy --only firestore:rules
+// (requires the Firebase CLI, logged into the leo-ai-101 project)
+//
+// Mirrors src/app/leo-ui/src/lib/roles.ts — keep the developer email list
+// in sync between the two. The WhatsApp bridge worker writes via the
+// Firebase Admin SDK, which bypasses these rules entirely, so rules here
+// only govern what the website itself (signed-in staff) can read/write.
+
+function isSignedIn() {
+  return request.auth != null;
+}
+
+function isDeveloper() {
+  return isSignedIn() &&
+    request.auth.token.email in [
+      'thimira.vishwa2003@gmail.com'
+    ];
+}
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Company data — any signed-in staff member can read; writes are
+    // expected to come from LEO's own connectors/automation (via the
+    // Admin SDK) rather than being hand-edited from the dashboard.
+    match /tasks/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+    match /leads/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+    match /adSuggestions/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+    match /seoIssues/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+    match /events/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // Activity log — any signed-in user can read and append (the app logs
+    // its own real actions here, e.g. a chat reply going out).
+    match /activity/{id} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    // Per-user chat history.
+    match /chats/{uid}/messages/{id} {
+      allow read, create: if isSignedIn() && request.auth.uid == uid;
+      allow update, delete: if false;
+    }
+
+    // Voice profiles — shared across the company so LEO recognises anyone
+    // who has enrolled, regardless of who's signed into the dashboard.
+    match /voiceProfiles/{id} {
+      allow read, create, update: if isSignedIn();
+      allow delete: if isDeveloper();
+    }
+
+    // WhatsApp link status — written only by the bridge worker (Admin
+    // SDK, bypasses these rules). The dashboard only ever reads it.
+    match /whatsapp/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // Link/unlink requests — only the developer role may ask the bridge
+    // to do anything, since this controls a real WhatsApp account.
+    match /whatsappCommands/{id} {
+      allow read: if isDeveloper();
+      allow create: if isDeveloper();
+      allow update, delete: if false;
+    }
+  }
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { LucideIcon } from "lucide-react";
+import { LucideIcon, Inbox } from "lucide-react";
 
 export type ListItem = {
   id: string | number;
@@ -15,11 +15,13 @@ export default function ListPanel({
   subtitle,
   icon: Icon,
   items,
+  emptyMessage,
 }: {
   title: string;
   subtitle: string;
   icon: LucideIcon;
   items: ListItem[];
+  emptyMessage?: string;
 }) {
   return (
     <div className="glass-panel flex h-full flex-col rounded-2xl p-5">
@@ -34,6 +36,14 @@ export default function ListPanel({
       </div>
 
       <div className="flex-1 space-y-2 overflow-y-auto">
+        {items.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted">
+            <Inbox size={18} className="opacity-50" />
+            <p className="text-xs">
+              {emptyMessage ?? "Nothing here yet."}
+            </p>
+          </div>
+        ) : null}
         {items.map((item) => {
           const accentVar = `var(--accent-${item.accent ?? "cyan"})`;
           return (

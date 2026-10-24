@@ -1,58 +1,62 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ListTodo, Users, Megaphone, Search, CalendarClock } from "lucide-react";
 import CodeRainBackground from "@/components/CodeRainBackground";
 import Topbar from "@/components/Topbar";
 import StatCard from "@/components/StatCard";
 import ChatPanel from "@/components/ChatPanel";
 import ActivityFeed from "@/components/ActivityFeed";
-import ListPanel from "@/components/ListPanel";
+import ListPanel, { ListItem } from "@/components/ListPanel";
 import VoicesPanel from "@/components/VoicesPanel";
 import HomeHero from "@/components/HomeHero";
 import BottomNav, { TabId } from "@/components/BottomNav";
+import AuthGate from "@/components/AuthGate";
+import AdminPanel from "@/components/AdminPanel";
 import { useMicPermission } from "@/hooks/useMicPermission";
 import { VoiceLang } from "@/hooks/useWakeWord";
+import { useAuth } from "@/hooks/useAuth";
+import {
+  subscribeTasks,
+  subscribeLeads,
+  subscribeAdSuggestions,
+  subscribeSeoIssues,
+  subscribeEvents,
+} from "@/lib/companyData";
 
-const TODO_ITEMS = [
-  { id: 1, title: "Follow up with 3 new leads", subtitle: "Meta Ads — Diploma in AI campaign", meta: "High", accent: "magenta" as const },
-  { id: 2, title: "Fix missing meta description", subtitle: "/courses/ai-diploma", meta: "SEO", accent: "amber" as const },
-  { id: 3, title: "Confirm pending LMS enrolment", subtitle: "[email protected]", meta: "Awaiting you", accent: "cyan" as const },
-  { id: 4, title: "Review ad CPA spike", subtitle: "Diploma campaign, +12% in 24h", meta: "Ads", accent: "violet" as const },
-  { id: 5, title: "Approve scheduled post", subtitle: "Instagram — 6:00 PM today", meta: "Events", accent: "green" as const },
-];
-
-const LEAD_ITEMS = [
-  { id: 1, title: "Nadeesha Perera", subtitle: "Diploma in AI — Meta Lead Ad", meta: "2m ago", accent: "magenta" as const },
-  { id: 2, title: "Kavindu Silva", subtitle: "Diploma in AI — Meta Lead Ad", meta: "18m ago", accent: "magenta" as const },
-  { id: 3, title: "Ishara Fernando", subtitle: "Short Course — Website form", meta: "1h ago", accent: "cyan" as const },
-];
-
-const AD_ITEMS = [
-  { id: 1, title: "Pause or refresh creative", subtitle: "Diploma in AI — CPA up 12% in 24h", meta: "Suggested", accent: "amber" as const },
-  { id: 2, title: "Increase budget +20%", subtitle: "Short Course — CTR trending up", meta: "Suggested", accent: "green" as const },
-];
-
-const SEO_ITEMS = [
-  { id: 1, title: "Missing meta description", subtitle: "/courses/ai-diploma", meta: "Fix now", accent: "amber" as const },
-];
-
-const EVENT_ITEMS = [
-  { id: 1, title: "Open house — campus tour", subtitle: "Tomorrow, 10:00 AM", meta: "Event", accent: "cyan" as const },
-  { id: 2, title: "Scheduled Instagram post", subtitle: "Today, 6:00 PM", meta: "Post", accent: "violet" as const },
-];
-
-export default function Home() {
+function DashboardApp() {
   const [tab, setTab] = useState<TabId>("home");
   const [lastHeard, setLastHeard] = useState<string | null>(null);
   const [voiceLang, setVoiceLang] = useState<VoiceLang>("en-US");
   const mic = useMicPermission();
+  const { user, signOut, isDeveloper } = useAuth();
+
+  const [tasks, setTasks] = useState<ListItem[]>([]);
+  const [leads, setLeads] = useState<ListItem[]>([]);
+  const [adSuggestions, setAdSuggestions] = useState<ListItem[]>([]);
+  const [seoIssues, setSeoIssues] = useState<ListItem[]>([]);
+  const [events, setEvents] = useState<ListItem[]>([]);
+
+  useEffect(() => subscribeTasks(setTasks), []);
+  useEffect(() => subscribeLeads(setLeads), []);
+  useEffect(() => subscribeAdSuggestions(setAdSuggestions), []);
+  useEffect(() => subscribeSeoIssues(setSeoIssues), []);
+  useEffect(() => subscribeEvents(setEvents), []);
+
+  const hasAnyData =
+    tasks.length + leads.length + adSuggestions.length + seoIssues.length > 0;
 
   return (
     <div className="relative flex min-h-screen w-full flex-col gap-4 p-4">
       <CodeRainBackground />
 
-      <Topbar voiceLang={voiceLang} onVoiceLangChange={setVoiceLang} />
+      <Topbar
+        voiceLang={voiceLang}
+        onVoiceLangChange={setVoiceLang}
+        user={user}
+        onSignOut={signOut}
+        connectorsActive={0}
+      />
 
       <main className="mx-auto w-full max-w-5xl flex-1">
         {tab === "home" && (
@@ -76,23 +80,21 @@ export default function Home() {
         {tab === "overview" && (
           <div className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <StatCard label="To-Do Today" value="5" delta="2 new" icon={ListTodo} accent="cyan" />
-              <StatCard label="New Leads" value="3" delta="+3 today" icon={Users} accent="violet" />
-              <StatCard label="Ad Alerts" value="2" delta="CPA +12%" trend="down" icon={Megaphone} accent="magenta" />
-              <StatCard label="SEO Issues" value="1" delta="-4 this week" icon={Search} accent="green" />
+              <StatCard label="To-Do Today" value={String(tasks.length)} icon={ListTodo} accent="cyan" />
+              <StatCard label="New Leads" value={String(leads.length)} icon={Users} accent="violet" />
+              <StatCard label="Ad Alerts" value={String(adSuggestions.length)} icon={Megaphone} accent="magenta" />
+              <StatCard label="SEO Issues" value={String(seoIssues.length)} icon={Search} accent="green" />
             </div>
 
             <div className="glass-panel rounded-2xl p-5">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-foreground">Today&apos;s briefing</h2>
-                <span className="font-mono text-[10px] text-muted">generated by LEO · model router</span>
+                <span className="font-mono text-[10px] text-muted">generated by LEO</span>
               </div>
               <p className="text-sm leading-relaxed text-muted">
-                Good morning. Since the last heartbeat, I found{" "}
-                <span className="text-foreground">2 new leads</span> from the Meta Ads diploma
-                campaign, <span className="text-foreground">1 SEO fix</span> on the AI diploma
-                course page, and <span className="text-foreground">1 LMS enrolment</span> waiting
-                on your confirmation.
+                {hasAnyData
+                  ? `You have ${tasks.length} task${tasks.length === 1 ? "" : "s"}, ${leads.length} lead${leads.length === 1 ? "" : "s"}, ${adSuggestions.length} ad alert${adSuggestions.length === 1 ? "" : "s"}, and ${seoIssues.length} SEO issue${seoIssues.length === 1 ? "" : "s"} right now.`
+                  : "No connectors are feeding data in yet — once the website, Meta Ads, LMS, and SEO crawl are wired up, this briefing will summarise what changed since the last check automatically."}
               </p>
             </div>
 
@@ -104,37 +106,67 @@ export default function Home() {
 
         {tab === "chat" && (
           <div className="h-[70vh]">
-            <ChatPanel voiceLang={voiceLang} />
+            <ChatPanel voiceLang={voiceLang} uid={user?.uid ?? null} />
           </div>
         )}
 
         {tab === "todo" && (
           <div className="h-[70vh]">
-            <ListPanel title="To-Do Today" subtitle="Generated from everything LEO found" icon={ListTodo} items={TODO_ITEMS} />
+            <ListPanel
+              title="To-Do Today"
+              subtitle="Generated from everything LEO found"
+              icon={ListTodo}
+              items={tasks}
+              emptyMessage="No tasks yet. Once LEO's connectors start running, anything that needs your attention will land here."
+            />
           </div>
         )}
 
         {tab === "leads" && (
           <div className="h-[70vh]">
-            <ListPanel title="Leads" subtitle="Captured from Meta Ads and the website" icon={Users} items={LEAD_ITEMS} />
+            <ListPanel
+              title="Leads"
+              subtitle="Captured from Meta Ads and the website"
+              icon={Users}
+              items={leads}
+              emptyMessage="No leads yet. Connect Meta Lead Ads to start capturing them automatically."
+            />
           </div>
         )}
 
         {tab === "ads" && (
           <div className="h-[70vh]">
-            <ListPanel title="Ad Suggestions" subtitle="Reviewed against performance thresholds" icon={Megaphone} items={AD_ITEMS} />
+            <ListPanel
+              title="Ad Suggestions"
+              subtitle="Reviewed against performance thresholds"
+              icon={Megaphone}
+              items={adSuggestions}
+              emptyMessage="No ad suggestions yet. Connect the Meta Ads account to get performance alerts."
+            />
           </div>
         )}
 
         {tab === "seo" && (
           <div className="h-[70vh]">
-            <ListPanel title="SEO Health" subtitle="Issues found on the last crawl" icon={Search} items={SEO_ITEMS} />
+            <ListPanel
+              title="SEO Health"
+              subtitle="Issues found on the last crawl"
+              icon={Search}
+              items={seoIssues}
+              emptyMessage="No SEO issues logged yet. Once the site crawler runs, fixes will be listed here."
+            />
           </div>
         )}
 
         {tab === "events" && (
           <div className="h-[70vh]">
-            <ListPanel title="Upcoming Events" subtitle="From the shared calendar and post schedule" icon={CalendarClock} items={EVENT_ITEMS} />
+            <ListPanel
+              title="Upcoming Events"
+              subtitle="From the shared calendar and post schedule"
+              icon={CalendarClock}
+              items={events}
+              emptyMessage="No upcoming events yet. Connect a calendar to see them here."
+            />
           </div>
         )}
 
@@ -149,9 +181,28 @@ export default function Home() {
             <VoicesPanel micState={mic.state} onRequestMic={mic.request} />
           </div>
         )}
+
+        {tab === "admin" && isDeveloper && (
+          <div className="h-[70vh]">
+            <AdminPanel />
+          </div>
+        )}
       </main>
 
-      <BottomNav active={tab} onChange={setTab} />
+      <BottomNav
+        active={tab}
+        onChange={setTab}
+        showAdmin={isDeveloper}
+        badges={{ todo: tasks.length, leads: leads.length, ads: adSuggestions.length }}
+      />
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <AuthGate>
+      <DashboardApp />
+    </AuthGate>
   );
 }
