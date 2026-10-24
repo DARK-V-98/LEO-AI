@@ -38,8 +38,103 @@ const OUTBOX = db.collection("whatsappOutbox");
 const AUTH_DIR = process.env.AUTH_DIR || "./auth_info";
 const logger = pino({ level: process.env.LOG_LEVEL || "warn" });
 
+// Where the LLM actually lives — the same /api/chat route the website's
+// chat tab uses. This worker has no AI of its own, it just relays to it.
+const WEB_BASE_URL = process.env.LEO_WEB_BASE_URL;
+if (!WEB_BASE_URL) {
+  console.warn(
+    "LEO_WEB_BASE_URL is not set — incoming WhatsApp messages will be ignored until it is (should be your Vercel site's URL, e.g. https://leo-ai-leo-ui.vercel.app)."
+  );
+}
+
+// Who gets a reply to *every* message vs. only when addressed by name.
+// DMs: LEO is the only recipient, so anything sent to him is for him.
+// Groups: only reply when "Leo" is actually said, same rule as voice —
+// otherwise he'd answer every single message in the company group.
+const MENTION_PATTERN = /\bleo\b/i;
+
 let sock = null;
 let starting = false;
+
+// Short-lived, in-memory per-chat conversation context (lost on restart —
+// good enough for "what did I just ask", not meant as permanent history).
+const chatMemory = new Map();
+function remember(jid, role, content) {
+  const history = chatMemory.get(jid) ?? [];
+  history.push({ role, content });
+  while (history.length > 12) history.shift();
+  chatMemory.set(jid, history);
+}
+
+async function askLeo(jid, text) {
+  remember(jid, "user", text);
+  if (!WEB_BASE_URL) {
+    return "I'm not fully set up to chat here yet — ask the team to finish the WhatsApp setup (LEO_WEB_BASE_URL).";
+  }
+  try {
+    const res = await fetch(`${WEB_BASE_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ history: chatMemory.get(jid) }),
+    });
+    const data = await res.json();
+    const reply = data?.reply || "Sorry, I didn't catch that — could you say it again?";
+    remember(jid, "assistant", reply);
+    return reply;
+  } catch (err) {
+    console.error("AI reply failed:", err);
+    return "I couldn't reach my systems just now — try again shortly.";
+  }
+}
+
+function extractText(message) {
+  return (
+    message?.conversation ||
+    message?.extendedTextMessage?.text ||
+    message?.imageMessage?.caption ||
+    message?.videoMessage?.caption ||
+    ""
+  ).trim();
+}
+
+function attachMessageHandler(activeSock) {
+  activeSock.ev.on("messages.upsert", async ({ messages, type }) => {
+    if (type !== "notify") return;
+
+    for (const msg of messages) {
+      try {
+        const remoteJid = msg.key.remoteJid;
+        if (!remoteJid || remoteJid === "status@broadcast") continue;
+        if (msg.key.fromMe) continue; // don't reply to LEO's own messages
+
+        const text = extractText(msg.message);
+        if (!text) continue;
+
+        const isGroup = remoteJid.endsWith("@g.us");
+        if (isGroup && !MENTION_PATTERN.test(text)) continue;
+
+        const askText = isGroup ? text.replace(MENTION_PATTERN, "").trim() || text : text;
+
+        await activeSock.sendPresenceUpdate("composing", remoteJid).catch(() => {});
+        const reply = await askLeo(remoteJid, askText);
+        await activeSock.sendMessage(remoteJid, { text: reply });
+        await activeSock.sendPresenceUpdate("paused", remoteJid).catch(() => {});
+
+        await db
+          .collection("activity")
+          .add({
+            title: "Replied on WhatsApp",
+            detail: isGroup ? `Group message: "${askText.slice(0, 60)}"` : `DM: "${askText.slice(0, 60)}"`,
+            type: "ok",
+            createdAt: Date.now(),
+          })
+          .catch(() => {});
+      } catch (err) {
+        console.error("Failed to handle an incoming WhatsApp message:", err);
+      }
+    }
+  });
+}
 
 async function setStatus(partial) {
   await STATUS_DOC.set({ ...partial, updatedAt: Date.now() }, { merge: true });
@@ -61,6 +156,7 @@ async function startSock() {
     });
 
     sock.ev.on("creds.update", saveCreds);
+    attachMessageHandler(sock);
 
     sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect, qr } = update;

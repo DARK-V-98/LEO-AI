@@ -13,6 +13,13 @@ only ever talk to each other via Firestore documents:
   (a group digest, an alert to an admin) writes `{to, text}` here; this
   worker sends it and marks it `sent: true`.
 
+It also listens for **incoming** WhatsApp messages and replies using the
+same AI as the website's Chat tab (it calls the deployed site's
+`/api/chat` route — it has no AI of its own). DMs always get a reply;
+in a group, it only replies when someone actually says "Leo", the same
+rule the voice wake-word uses, so he doesn't answer every message in the
+company group.
+
 It uses [Baileys](https://github.com/WhiskeySockets/Baileys), the
 unofficial WhatsApp Web multi-device protocol library — no headless
 browser needed, just a WebSocket connection, so it's cheap to run.
@@ -45,6 +52,10 @@ separate repo — just point it at this folder inside `LEO-AI`.
 3. Open the **Variables** tab and add:
    - `FIREBASE_SERVICE_ACCOUNT` — paste the *entire* JSON file from step 1
      as one value (Railway handles multi-line/long values fine).
+   - `LEO_WEB_BASE_URL` — the dashboard's URL, e.g.
+     `https://leo-ai-leo-ui.vercel.app` (no trailing slash). Without
+     this, LEO can't reply to incoming WhatsApp messages — he'll just
+     stay silent.
    - `AUTH_DIR` — leave unset to use the default (`./auth_info`), or set
      it if you're mounting a volume somewhere specific (see step 4).
 4. Deploy. Check the **Deployments → Logs** tab — you should see:
