@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   ShieldCheck,
@@ -14,6 +14,7 @@ import {
   RefreshCw,
   List,
   Sparkles,
+  GraduationCap,
 } from "lucide-react";
 import {
   subscribeWhatsAppStatus,
@@ -21,6 +22,7 @@ import {
   requestWhatsAppUnlink,
   WhatsAppStatus,
 } from "@/lib/whatsapp";
+import { subscribeLmsStatus, requestLmsCheck, LmsStatus } from "@/lib/lmsStatus";
 import { firebaseEnabled } from "@/lib/firebase";
 import WhatsAppChatsPanel from "./WhatsAppChatsPanel";
 import WhatsAppAdminsPanel from "./WhatsAppAdminsPanel";
@@ -57,8 +59,26 @@ export default function AdminPanel() {
   const [checkingProviders, setCheckingProviders] = useState(false);
   const [modelsInfo, setModelsInfo] = useState<OpenRouterModelsResponse | null>(null);
   const [checkingModels, setCheckingModels] = useState(false);
+  const [lmsStatus, setLmsStatus] = useState<LmsStatus | null>(null);
+  const [checkingLms, setCheckingLms] = useState(false);
+  const lmsRequestedAtRef = useRef(0);
 
   useEffect(() => subscribeWhatsAppStatus(setStatus), []);
+  useEffect(() => subscribeLmsStatus(setLmsStatus), []);
+
+  useEffect(() => {
+    if (checkingLms && lmsStatus?.checkedAt && lmsStatus.checkedAt >= lmsRequestedAtRef.current) {
+      setCheckingLms(false);
+    }
+  }, [lmsStatus, checkingLms]);
+
+  async function checkLms() {
+    setCheckingLms(true);
+    lmsRequestedAtRef.current = Date.now();
+    await requestLmsCheck();
+    // Safety timeout — the bridge might be down/unreachable and never reply.
+    setTimeout(() => setCheckingLms(false), 15000);
+  }
 
   const current = status?.status ?? "disconnected";
   const copy = STATUS_COPY[current];
@@ -332,6 +352,56 @@ export default function AdminPanel() {
             <p className="font-mono text-[10px] text-muted/70">
               Checked {new Date(modelsInfo.checkedAt).toLocaleTimeString()}
             </p>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-panel-border bg-white/[0.02] p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <GraduationCap size={16} className="text-muted" />
+            <h3 className="text-sm font-medium text-foreground">
+              LMS connection
+            </h3>
+          </div>
+          <button
+            onClick={checkLms}
+            disabled={checkingLms}
+            className="flex items-center gap-1.5 rounded-lg bg-accent-cyan/15 px-3 py-1.5 text-xs font-medium text-accent-cyan hover:bg-accent-cyan/25 disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={checkingLms ? "animate-spin" : ""} />
+            {checkingLms ? "Checking…" : "Check connection"}
+          </button>
+        </div>
+
+        {!firebaseEnabled ? (
+          <p className="text-xs text-muted">Firebase isn&apos;t configured here.</p>
+        ) : !lmsStatus ? (
+          <p className="text-xs text-muted">
+            Only the WhatsApp bridge holds the LMS credentials, so this asks
+            it (via Firestore) to make a real authenticated call to the LMS
+            and report back — not just &quot;is the key set&quot;.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-start gap-2 rounded-lg border border-panel-border bg-white/[0.02] px-3 py-2">
+              {lmsStatus.ok ? (
+                <CheckCircle2 size={14} className="mt-0.5 flex-shrink-0 text-accent-green" />
+              ) : (
+                <XCircle size={14} className="mt-0.5 flex-shrink-0 text-accent-magenta" />
+              )}
+              <div>
+                <p className="text-xs font-medium text-foreground">{lmsStatus.message}</p>
+                {lmsStatus.detail ? (
+                  <p className="text-[11px] text-muted">{lmsStatus.detail}</p>
+                ) : null}
+              </div>
+            </div>
+            {lmsStatus.checkedAt ? (
+              <p className="font-mono text-[10px] text-muted/70">
+                Checked {new Date(lmsStatus.checkedAt).toLocaleTimeString()}
+              </p>
+            ) : null}
           </div>
         )}
       </div>

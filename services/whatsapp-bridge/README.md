@@ -146,6 +146,14 @@ dates, not the AI — so these are fast and don't cost an AI call):
   - Needs `LMS_BASE_URL` and `LMS_API_KEY` set (see Variables below) — LMS
     commands are simply disabled (the admin gets told it isn't configured
     yet) until both are set.
+  - **Checking the connection**: the dashboard's Admin tab has an "LMS
+    connection" card with a "Check connection" button — since only this
+    worker holds `LMS_BASE_URL`/`LMS_API_KEY`, the dashboard can't test it
+    directly, so clicking it writes a request to `lmsCheckRequests`, this
+    worker makes a real authenticated call to the LMS (`GET
+    /api/leo/courses`) and writes the result to `lms/status`, and the
+    dashboard shows that live. Confirms the key and URL actually work, not
+    just that they're set.
 
 `companyKnowledge` starts pre-seeded (on first boot, if empty) with:
 SmartLabs is an educational institute; Ms. Lahiruka is the Managing

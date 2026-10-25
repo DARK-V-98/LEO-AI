@@ -44,6 +44,8 @@ const PEOPLE = db.collection("people");
 const LEADS = db.collection("leads");
 const TASKS = db.collection("tasks");
 const WHATSAPP_ADMINS = db.collection("whatsappAdmins");
+const LMS_STATUS_DOC = db.collection("lms").doc("status");
+const LMS_CHECK_REQUESTS = db.collection("lmsCheckRequests");
 
 // Optional: a WhatsApp JID (a number like "94771234567@s.whatsapp.net") to
 // send a once-a-day summary of new leads/tasks to. Unset by default — the
@@ -90,6 +92,22 @@ const lmsGrant = (studentId, courseId, batchId, adminPhoneNumber) =>
   callLms("/api/leo/enrollments/grant", { method: "POST", body: { studentId, courseId, batchId, adminPhoneNumber } });
 const lmsRemove = (enrollmentId, adminPhoneNumber, hard) =>
   callLms("/api/leo/enrollments/remove", { method: "POST", body: { enrollmentId, adminPhoneNumber, hard } });
+
+// Real connectivity check, triggered by the dashboard's "Check LMS
+// connection" button (via lmsCheckRequests) — not just "is the env var
+// set", but an actual authenticated call against the live LMS, the same
+// as a human clicking around would confirm it works.
+async function checkLmsConnection() {
+  if (!LMS_BASE_URL || !LMS_API_KEY) {
+    return { ok: false, message: "Not configured", detail: "LMS_BASE_URL/LMS_API_KEY aren't set on this service." };
+  }
+  try {
+    const courses = await lmsListCourses();
+    return { ok: true, message: "Connected", detail: `${courses.length} course${courses.length === 1 ? "" : "s"} visible.` };
+  } catch (err) {
+    return { ok: false, message: "Request failed", detail: String(err.message || err) };
+  }
+}
 
 // Finds pending enrollments whose student name/email and (optionally)
 // course title loosely match what was typed on WhatsApp. This is the only
@@ -1384,6 +1402,21 @@ COMMANDS.orderBy("createdAt", "asc").onSnapshot((snap) => {
     } catch (err) {
       console.error("Command failed:", err);
     }
+  });
+});
+
+// --- LMS connection check requests from the dashboard ----------------------
+LMS_CHECK_REQUESTS.orderBy("createdAt", "asc").onSnapshot((snap) => {
+  snap.docChanges().forEach(async (change) => {
+    if (change.type !== "added") return;
+    const data = change.doc.data();
+    if (data.processed) return;
+    await change.doc.ref.update({ processed: true, processedAt: Date.now() }).catch(() => {});
+
+    const result = await checkLmsConnection();
+    await LMS_STATUS_DOC.set({ ...result, checkedAt: Date.now() }, { merge: true }).catch((err) =>
+      console.error("Failed to write LMS status:", err)
+    );
   });
 });
 

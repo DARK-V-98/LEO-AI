@@ -106,5 +106,21 @@ service cloud.firestore {
       allow create, delete: if isDeveloper();
       allow update: if false;
     }
+
+    // LMS connection status — written only by the bridge worker (Admin
+    // SDK), which is the only thing that actually holds the LMS_BASE_URL/
+    // LMS_API_KEY credentials. The dashboard only ever reads it.
+    match /lms/{id} {
+      allow read: if isDeveloper();
+      allow write: if false;
+    }
+
+    // "Please re-check the LMS connection" requests — developer-only,
+    // same reasoning as whatsappCommands.
+    match /lmsCheckRequests/{id} {
+      allow read: if isDeveloper();
+      allow create: if isDeveloper();
+      allow update, delete: if false;
+    }
   }
 }
