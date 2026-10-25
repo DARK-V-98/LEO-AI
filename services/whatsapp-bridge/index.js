@@ -44,12 +44,149 @@ const PEOPLE = db.collection("people");
 const LEADS = db.collection("leads");
 const TASKS = db.collection("tasks");
 const WHATSAPP_ADMINS = db.collection("whatsappAdmins");
-const ENROLLMENTS = db.collection("enrollments");
 
 // Optional: a WhatsApp JID (a number like "94771234567@s.whatsapp.net") to
 // send a once-a-day summary of new leads/tasks to. Unset by default — the
 // digest is simply skipped until someone opts in by setting this.
 const DAILY_DIGEST_JID = process.env.DAILY_DIGEST_JID || null;
+
+// --- SmartLabs LMS integration -------------------------------------------
+// A completely separate Firebase project/app (esystemlk/lms-smartlabs),
+// reached only through its own protected /api/leo/* routes — never direct
+// Firestore access from here. LMS_API_KEY is the shared secret those
+// routes check (their LEO_API_KEY); LMS_BASE_URL is the LMS's own deployed
+// URL. Both unset by default — LMS commands are simply disabled until set.
+const LMS_BASE_URL = process.env.LMS_BASE_URL || null;
+const LMS_API_KEY = process.env.LMS_API_KEY || null;
+
+async function callLms(path, { method = "GET", body } = {}) {
+  if (!LMS_BASE_URL || !LMS_API_KEY) {
+    throw new Error("LMS integration isn't configured yet (LMS_BASE_URL/LMS_API_KEY).");
+  }
+  const res = await fetch(`${LMS_BASE_URL}${path}`, {
+    method,
+    headers: {
+      "x-api-key": LMS_API_KEY,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(data?.error || `LMS request failed (HTTP ${res.status})`);
+  }
+  return data;
+}
+
+const lmsFindStudents = (q) => callLms(`/api/leo/students?q=${encodeURIComponent(q)}`).then((d) => d.students || []);
+const lmsListCourses = () => callLms("/api/leo/courses").then((d) => d.courses || []);
+const lmsListPendingEnrollments = () =>
+  callLms("/api/leo/enrollments/pending").then((d) => d.enrollments || []);
+const lmsApprove = (enrollmentId, adminPhoneNumber) =>
+  callLms("/api/leo/enrollments/approve", { method: "POST", body: { enrollmentId, adminPhoneNumber } });
+const lmsReject = (enrollmentId, adminPhoneNumber, reason) =>
+  callLms("/api/leo/enrollments/reject", { method: "POST", body: { enrollmentId, adminPhoneNumber, reason } });
+const lmsGrant = (studentId, courseId, batchId, adminPhoneNumber) =>
+  callLms("/api/leo/enrollments/grant", { method: "POST", body: { studentId, courseId, batchId, adminPhoneNumber } });
+const lmsRemove = (enrollmentId, adminPhoneNumber, hard) =>
+  callLms("/api/leo/enrollments/remove", { method: "POST", body: { enrollmentId, adminPhoneNumber, hard } });
+
+// Finds pending enrollments whose student name/email and (optionally)
+// course title loosely match what was typed on WhatsApp. This is the only
+// LMS lookup that can resolve a *specific* enrollment by name today — the
+// student-search endpoint returns course/batch IDs a student is in, not
+// enrollment IDs, so "remove"/"approve"/"reject" all key off this pending
+// list. That means remove only ever finds a match for a still-pending
+// enrollment; removing an already-active student's access by name isn't
+// possible yet (the LMS would need to expose a lookup for those too).
+async function findMatchingPendingEnrollments(studentQuery, courseQuery) {
+  const pending = await lmsListPendingEnrollments();
+  const sq = studentQuery.trim().toLowerCase();
+  const cq = courseQuery?.trim().toLowerCase();
+  return pending.filter((e) => {
+    const nameMatch =
+      e.userName?.toLowerCase().includes(sq) || e.userEmail?.toLowerCase().includes(sq);
+    if (!nameMatch) return false;
+    if (!cq) return true;
+    return e.courseTitle?.toLowerCase().includes(cq);
+  });
+}
+
+function describeAmbiguousMatches(matches) {
+  return matches
+    .map((e) => `${e.userName} (${e.userEmail}) — ${e.courseTitle}`)
+    .join("\n");
+}
+
+// approve / reject / remove all key off the same pending-enrollment lookup
+// (see findMatchingPendingEnrollments) — remove only resolves a *pending*
+// request this way; removing an already-active student by name isn't
+// possible from WhatsApp yet.
+async function handlePendingEnrollmentCommand(cmd, adminPhoneNumber) {
+  const courseQuery = cmd.action === "approve" || cmd.action === "remove" ? cmd.course : null;
+  const matches = await findMatchingPendingEnrollments(cmd.student, courseQuery);
+
+  if (matches.length === 0) {
+    return cmd.action === "remove"
+      ? `Couldn't find a pending request matching "${cmd.student}"${cmd.course ? ` for "${cmd.course}"` : ""} — removing an already-active student by name isn't supported from WhatsApp yet.`
+      : `Couldn't find a pending enrollment request matching "${cmd.student}"${cmd.course ? ` for "${cmd.course}"` : ""}.`;
+  }
+  if (matches.length > 1) {
+    return `Found ${matches.length} matching pending requests — which one?\n${describeAmbiguousMatches(matches)}`;
+  }
+
+  const match = matches[0];
+  if (cmd.action === "approve") {
+    const { enrollment } = await lmsApprove(match.id, adminPhoneNumber);
+    return `Approved: ${enrollment?.userName || match.userName} for ${enrollment?.courseTitle || match.courseTitle} (${enrollment?.batchName || match.batchName}).`;
+  }
+  if (cmd.action === "reject") {
+    const { enrollment } = await lmsReject(match.id, adminPhoneNumber, cmd.detail);
+    return `Rejected: ${enrollment?.userName || match.userName} for ${enrollment?.courseTitle || match.courseTitle}${cmd.detail ? ` (${cmd.detail})` : ""}.`;
+  }
+  // remove
+  await lmsRemove(match.id, adminPhoneNumber, false);
+  return `Removed: ${match.userName}'s access to ${match.courseTitle} (${match.batchName}).`;
+}
+
+// "enroll <student> in <course>" — resolves a student and a course+batch,
+// then grants immediate access (skips the pending step entirely).
+async function handleEnrollCommand(cmd, adminPhoneNumber) {
+  const students = await lmsFindStudents(cmd.student);
+  if (students.length === 0) {
+    return `Couldn't find a student matching "${cmd.student}".`;
+  }
+  if (students.length > 1) {
+    const list = students.map((s) => `${s.name} (${s.email})`).join("\n");
+    return `Found ${students.length} students matching "${cmd.student}" — which one? Try again with their email.\n${list}`;
+  }
+  const student = students[0];
+
+  const courses = await lmsListCourses();
+  const cq = cmd.course.trim().toLowerCase();
+  const courseMatches = courses.filter((c) => c.title?.toLowerCase().includes(cq));
+  if (courseMatches.length === 0) {
+    return `Couldn't find a course matching "${cmd.course}".`;
+  }
+  if (courseMatches.length > 1) {
+    return `Found ${courseMatches.length} courses matching "${cmd.course}" — which one?\n${courseMatches.map((c) => c.title).join("\n")}`;
+  }
+  const course = courseMatches[0];
+
+  const openBatches = (course.batches || []).filter((b) => b.status === "open" || b.status === "ongoing");
+  if (openBatches.length === 0) {
+    return `"${course.title}" has no open batch to enroll into right now.`;
+  }
+  // If the course text also named a batch ("... January 2026 Intake"), prefer that match.
+  const namedBatch = openBatches.find((b) => cq.includes(b.name.toLowerCase()));
+  const batch = namedBatch || (openBatches.length === 1 ? openBatches[0] : null);
+  if (!batch) {
+    return `"${course.title}" has ${openBatches.length} open batches — which one?\n${openBatches.map((b) => b.name).join("\n")}`;
+  }
+
+  await lmsGrant(student.id, course.id, batch.id, adminPhoneNumber);
+  return `Enrolled: ${student.name} in ${course.title} (${batch.name}).`;
+}
 
 // --- WhatsApp admin permissions -----------------------------------------
 // A small, privileged set of numbers (managed only from the dashboard —
@@ -283,8 +420,10 @@ const BASE_HELP_LINES = [
 
 const ADMIN_HELP_LINES = [
   "",
-  "Admin-only (your number has this):",
-  '• "approve <student> [for <course>]" / "reject <student>[: <reason>]" — records an enrollment decision.',
+  "Admin-only (your number has this — LMS actions):",
+  '• "approve <student> [for <course>]" / "reject <student>[: <reason>]" — decides a pending enrollment request.',
+  '• "enroll <student> in <course>" — grants immediate course/batch access, skipping the pending step.',
+  '• "remove <student> from <course>" — bans their pending request (doesn\'t touch an already-active student yet).',
 ];
 
 // Admin commands only show up in the help text for admins — a student
@@ -411,21 +550,31 @@ function parsePoll(text) {
   return { question, options };
 }
 
-// --- Admin-only: student enrollment decisions -------------------------
-// "approve <student>[ for <course>]" / "reject <student>[: <reason>]" —
-// the first concrete admin-only LMS-style action. Gated on isWhatsAppAdmin
-// at dispatch time, not just by who happens to know the phrasing.
+// --- Admin-only: LMS enrollment commands -------------------------------
+// Gated on isWhatsAppAdmin at dispatch time, not just by who happens to
+// know the phrasing. Each wraps a real /api/leo/* route in the LMS —
+// see the "LEO <-> SmartLabs LMS" integration doc for the full contract.
 const APPROVE_PATTERN = /^\s*approve\s+(.+?)(?:\s+for\s+(.+))?\s*$/i;
 const REJECT_PATTERN = /^\s*reject\s+(.+?)(?:\s*[:\-]\s*(.+))?\s*$/i;
+const ENROLL_PATTERN = /^\s*(?:enroll|grant)\s+(.+?)\s+(?:in|into|for|access to)\s+(.+?)\s*$/i;
+const REMOVE_PATTERN = /^\s*remove\s+(.+?)\s+from\s+(.+?)\s*$/i;
 
-function parseEnrollmentDecision(text) {
+function parseEnrollmentCommand(text) {
   const approveMatch = text.match(APPROVE_PATTERN);
   if (approveMatch) {
-    return { decision: "approved", student: approveMatch[1].trim(), detail: approveMatch[2]?.trim() || null };
+    return { action: "approve", student: approveMatch[1].trim(), course: approveMatch[2]?.trim() || null };
   }
   const rejectMatch = text.match(REJECT_PATTERN);
   if (rejectMatch) {
-    return { decision: "rejected", student: rejectMatch[1].trim(), detail: rejectMatch[2]?.trim() || null };
+    return { action: "reject", student: rejectMatch[1].trim(), detail: rejectMatch[2]?.trim() || null };
+  }
+  const enrollMatch = text.match(ENROLL_PATTERN);
+  if (enrollMatch) {
+    return { action: "enroll", student: enrollMatch[1].trim(), course: enrollMatch[2].trim() };
+  }
+  const removeMatch = text.match(REMOVE_PATTERN);
+  if (removeMatch) {
+    return { action: "remove", student: removeMatch[1].trim(), course: removeMatch[2].trim() };
   }
   return null;
 }
@@ -807,20 +956,20 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
         const rememberMatch = askText.match(REMEMBER_PATTERN);
         const whatRemember = !rememberMatch && WHAT_REMEMBER_PATTERN.test(askText);
         const forgetMe = !rememberMatch && !whatRemember && FORGET_ME_PATTERN.test(askText);
-        const enrollmentDecision =
-          !rememberMatch && !whatRemember && !forgetMe ? parseEnrollmentDecision(askText) : null;
+        const enrollmentCommand =
+          !rememberMatch && !whatRemember && !forgetMe ? parseEnrollmentCommand(askText) : null;
         const pollMatch =
-          !rememberMatch && !whatRemember && !forgetMe && !enrollmentDecision ? parsePoll(askText) : null;
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand ? parsePoll(askText) : null;
         const posterMatch =
-          !rememberMatch && !whatRemember && !forgetMe && !enrollmentDecision && !pollMatch
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch
             ? askText.match(POSTER_PATTERN)
             : null;
         const reminder =
-          !rememberMatch && !whatRemember && !forgetMe && !enrollmentDecision && !pollMatch
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch
             ? parseReminder(askText)
             : null;
         const groupSend =
-          !rememberMatch && !whatRemember && !forgetMe && !enrollmentDecision && !pollMatch && !reminder
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !reminder
             ? parseGroupSend(askText)
             : null;
 
@@ -853,35 +1002,33 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
               createdAt: Date.now(),
             })
             .catch(() => {});
-        } else if (enrollmentDecision) {
+        } else if (enrollmentCommand) {
           if (!isWhatsAppAdmin(senderJid)) {
             await activeSock.sendMessage(remoteJid, { text: NOT_ADMIN_TEXT });
             remember(remoteJid, "assistant", NOT_ADMIN_TEXT);
           } else {
+            const adminPhoneNumber = senderJid.split("@")[0];
             try {
-              await ENROLLMENTS.add({
-                student: enrollmentDecision.student,
-                status: enrollmentDecision.decision,
-                detail: enrollmentDecision.detail,
-                decidedBy: senderJid,
-                decidedAt: Date.now(),
-                createdAt: Date.now(),
-              });
-              const confirmText = `${enrollmentDecision.decision === "approved" ? "Approved" : "Rejected"}: ${enrollmentDecision.student}${enrollmentDecision.detail ? ` (${enrollmentDecision.detail})` : ""}.`;
-              await activeSock.sendMessage(remoteJid, { text: confirmText });
-              remember(remoteJid, "assistant", confirmText);
+              let resultText;
+              if (enrollmentCommand.action === "enroll") {
+                resultText = await handleEnrollCommand(enrollmentCommand, adminPhoneNumber);
+              } else {
+                resultText = await handlePendingEnrollmentCommand(enrollmentCommand, adminPhoneNumber);
+              }
+              await activeSock.sendMessage(remoteJid, { text: resultText });
+              remember(remoteJid, "assistant", resultText);
               await db
                 .collection("activity")
                 .add({
-                  title: `Student ${enrollmentDecision.decision} via WhatsApp`,
-                  detail: enrollmentDecision.student,
+                  title: `LMS action via WhatsApp: ${enrollmentCommand.action}`,
+                  detail: `${enrollmentCommand.student} — ${enrollmentCommand.course || enrollmentCommand.detail || ""}`.trim(),
                   type: "ok",
                   createdAt: Date.now(),
                 })
                 .catch(() => {});
             } catch (err) {
-              console.error("Failed to record enrollment decision:", err);
-              const errText = "Something went wrong recording that — please try again.";
+              console.error("LMS command failed:", err);
+              const errText = `Couldn't do that — ${err.message || "something went wrong"}.`;
               await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
               remember(remoteJid, "assistant", errText);
             }

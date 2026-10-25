@@ -121,19 +121,31 @@ dates, not the AI — so these are fast and don't cost an AI call):
   Stays quiet on a day with nothing new, rather than pinging "0 leads, 0
   tasks". Checked periodically, not a precise cron — "once a day" means
   the first check at/after 8am Colombo time, not exact-to-the-minute.
-- **Admin-only commands** — `"approve <student> [for <course>]"` /
-  `"reject <student>[: <reason>]"` record an enrollment decision to
-  Firestore's `enrollments` collection, but only for numbers the developer
-  has explicitly granted admin access to (dashboard's Admin tab →
-  "WhatsApp admins" card). This matters once students have access to LEO
-  on WhatsApp too — most numbers should only ever be able to chat, not
-  make LMS decisions. A non-admin trying an admin command gets told
-  plainly that they don't have access, rather than it silently failing or
-  (worse) silently working. Admin access can only be granted/revoked from
-  the dashboard, never from WhatsApp itself, so an admin's own chat being
-  compromised can't be used to mint more admins. The help message
-  ("help"/"commands") only lists admin commands to numbers that actually
-  have them.
+- **Admin-only LMS commands** — `"approve <student> [for <course>]"`,
+  `"reject <student>[: <reason>]"`, `"enroll <student> in <course>"`, and
+  `"remove <student> from <course>"` call real routes on the SmartLabs LMS
+  (`esystemlk/lms-smartlabs`'s `/api/leo/*` endpoints — see the "LEO ↔
+  SmartLabs LMS" integration doc for the full contract), but only for
+  numbers the developer has explicitly granted admin access to
+  (dashboard's Admin tab → "WhatsApp admins" card). This matters once
+  students have access to LEO on WhatsApp too — most numbers should only
+  ever be able to chat, not make LMS decisions. A non-admin trying an
+  admin command gets told plainly that they don't have access, rather
+  than it silently failing or (worse) silently working. Admin access can
+  only be granted/revoked from the dashboard, never from WhatsApp itself,
+  so an admin's own chat being compromised can't be used to mint more
+  admins. The help message ("help"/"commands") only lists admin commands
+  to numbers that actually have them.
+  - `approve`/`reject`/`remove` all resolve the student+course against the
+    LMS's *pending* enrollment requests, since that's the only lookup the
+    LMS currently exposes by name — `remove` can only act on a still-pending
+    request, not an already-active student's access (the LMS would need a
+    new endpoint for that). `enroll` is different: it resolves a real
+    student and course/batch directly and grants immediate access,
+    skipping the pending step entirely.
+  - Needs `LMS_BASE_URL` and `LMS_API_KEY` set (see Variables below) — LMS
+    commands are simply disabled (the admin gets told it isn't configured
+    yet) until both are set.
 
 `companyKnowledge` starts pre-seeded (on first boot, if empty) with:
 SmartLabs is an educational institute; Ms. Lahiruka is the Managing
@@ -208,6 +220,13 @@ separate repo — just point it at this folder inside `LEO-AI`.
    - `GEMINI_DAILY_CALL_BUDGET` — optional, defaults to `1500`. A
      soft daily cap on Gemini calls (set on the website project, not
      here) — see the website's own env docs.
+   - `LMS_BASE_URL` — optional. The SmartLabs LMS's deployed URL (e.g.
+     `https://lms.smartlabs.lk`), no trailing slash. Needed for the
+     admin-only `approve`/`reject`/`enroll`/`remove` commands.
+   - `LMS_API_KEY` — optional, goes with `LMS_BASE_URL`. The shared
+     secret the LMS's own `LEO_API_KEY` env var was set to — ask whoever
+     set up the LMS side for the exact value. Treat it like
+     `FIREBASE_SERVICE_ACCOUNT`: a credential, never committed to git.
 4. Deploy. Check the **Deployments → Logs** tab — you should see:
    ```
    LEO WhatsApp bridge is up. Waiting for a link request from the dashboard…

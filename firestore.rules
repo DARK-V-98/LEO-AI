@@ -106,11 +106,5 @@ service cloud.firestore {
       allow create, delete: if isDeveloper();
       allow update: if false;
     }
-
-    // Student enrollment decisions made via WhatsApp admin commands.
-    match /enrollments/{id} {
-      allow read: if isSignedIn();
-      allow write: if false;
-    }
   }
 }
