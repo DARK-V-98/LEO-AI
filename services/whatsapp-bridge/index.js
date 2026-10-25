@@ -1090,19 +1090,36 @@ async function generatePoster(prompt, referenceImage) {
 // Search when the model supports it); this worker's job is turning the
 // Markdown that comes back into a real PDF file to send.
 
-// "document: <topic>" / "report: <topic>" shorthand, same style as poster:
-const DOCUMENT_SHORTHAND_PATTERN = /\b(?:documents?|reports?)\b\s*(?:on|about|for)?\s*[:\-]\s*(.+)/i;
-// "write/make/create/draft/prepare (me) a document/report/article about
-// <topic>", optionally led by "research ... and" (e.g. "research the new
-// AI regulations and write a report").
+// "document: <topic>" / "report: <topic>" / "pdf: <topic>" shorthand, same
+// style as poster: — optionally with an "on/about/for" lead-in before the
+// colon too ("report on: Q3 numbers").
+const DOCUMENT_SHORTHAND_PATTERN =
+  /\b(?:documents?|reports?|pdfs?|write-?ups?|articles?)\b\s*(?:on|about|for|regarding)?\s*[:\-]\s*(.+)/i;
+// "document/report/pdf about/on/for <topic>" — the most natural phrasing,
+// with or without a leading verb ("write a document about X", "give me a
+// report on X", or just "document about X" / "I need a document about X").
+const DOCUMENT_TOPIC_PATTERN =
+  /\b(?:documents?|reports?|pdfs?|write-?ups?|articles?)\b\s+(?:on|about|for|regarding)\s+(.+)/i;
+// "write/make/create/prepare/draft/generate/give (me)/send (me) a
+// document/report/pdf <topic>" — no preposition needed, as long as a real
+// creation verb actually led into it (so a bare mention of "the document"
+// in ordinary conversation never matches).
 const DOCUMENT_VERBOSE_PATTERN =
-  /\b(?:research\s+.+?\s+and\s+)?(?:write|make|create|prepare|draft|generate)\s+(?:me\s+)?(?:a\s+)?(?:document|report|article|write-?up)\s*(?:on|about|for|regarding)?\s*[:\-]?\s*(.+)/i;
+  /\b(?:write|make|create|prepare|draft|generate|give|send)\s+(?:me\s+)?(?:a\s+|an\s+)?(?:documents?|reports?|pdfs?|write-?ups?|articles?)\b\s*(?:on|about|for|regarding)?\s*[:\-]?\s*(.+)/i;
+// "research <topic> and write/make a document/report" — the topic comes
+// BEFORE the keyword here, not after, so it needs its own capture rather
+// than falling through to the patterns above (which would find nothing
+// after "report" and fail to match at all).
+const DOCUMENT_RESEARCH_PREFIX_PATTERN =
+  /\bresearch\s+(.+?)\s+and\s+(?:write|make|create|prepare|draft|generate)\s+(?:me\s+)?(?:a\s+|an\s+)?(?:documents?|reports?|pdfs?|write-?ups?|articles?)\b/i;
 
 function parseDocumentRequest(text) {
-  const shorthand = text.match(DOCUMENT_SHORTHAND_PATTERN);
-  if (shorthand) return shorthand[1].trim();
-  const verbose = text.match(DOCUMENT_VERBOSE_PATTERN);
-  if (verbose) return verbose[1].trim();
+  const researchMatch = text.match(DOCUMENT_RESEARCH_PREFIX_PATTERN);
+  if (researchMatch && researchMatch[1].trim()) return researchMatch[1].trim();
+  for (const pattern of [DOCUMENT_SHORTHAND_PATTERN, DOCUMENT_TOPIC_PATTERN, DOCUMENT_VERBOSE_PATTERN]) {
+    const match = text.match(pattern);
+    if (match && match[1].trim()) return match[1].trim();
+  }
   return null;
 }
 
