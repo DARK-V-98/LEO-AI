@@ -84,6 +84,106 @@ export async function generateSpeech(text: string): Promise<SpeechResult | null>
   }
 }
 
+export type DocumentSource = { title: string; url: string };
+export type DocumentResult = { title: string; markdown: string; sources: DocumentSource[] };
+
+const DOCUMENT_SYSTEM_PROMPT =
+  "You are LEO, SmartLabs' AI operator, now asked to research a topic and " +
+  "write a short, well-organized reference document about it — the kind " +
+  "a colleague could actually use, not a generic essay. If a Google Search " +
+  "tool is available to you, use it to ground this in real, current " +
+  "information wherever the topic calls for facts, numbers, or anything " +
+  "that could be out of date in your training — don't rely on memory " +
+  "alone for anything checkable. Write in Markdown: a single '# ' title " +
+  "line, then '## ' section headings, short paragraphs, and '- ' bullet " +
+  "lists where that's clearer than prose. Keep it factual and specific — " +
+  "real numbers, names, and dates where you have them, not vague " +
+  "generalities. Stay focused on exactly what was asked; don't pad it " +
+  "out with filler sections. Write in whichever language the request " +
+  "itself was written in.";
+
+async function tryGenerateDocument(
+  topic: string,
+  context: string | undefined,
+  useSearch: boolean
+): Promise<DocumentResult | null> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+
+  const prompt = context?.trim()
+    ? `${context.trim()}\n\nWrite the document now. Topic: ${topic.trim()}`
+    : `Write the document now. Topic: ${topic.trim()}`;
+
+  const DOCUMENT_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"];
+
+  for (const model of DOCUMENT_MODELS) {
+    if (!withinGeminiBudget()) return null;
+    try {
+      recordGeminiCall();
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            systemInstruction: { parts: [{ text: DOCUMENT_SYSTEM_PROMPT }] },
+            ...(useSearch ? { tools: [{ google_search: {} }] } : {}),
+          }),
+        }
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      const candidate = data?.candidates?.[0];
+      const parts: Array<{ text?: string }> = candidate?.content?.parts ?? [];
+      const markdown = parts
+        .map((p) => p.text)
+        .filter((t): t is string => typeof t === "string")
+        .join("\n")
+        .trim();
+      if (!markdown) continue;
+
+      const titleMatch = /^#\s+(.+)$/m.exec(markdown);
+      const title = titleMatch ? titleMatch[1].trim() : topic.trim();
+
+      const chunks: Array<{ web?: { uri?: string; title?: string } }> =
+        candidate?.groundingMetadata?.groundingChunks ?? [];
+      const seen = new Set<string>();
+      const sources: DocumentSource[] = [];
+      for (const chunk of chunks) {
+        const uri = chunk?.web?.uri;
+        if (uri && !seen.has(uri)) {
+          seen.add(uri);
+          sources.push({ title: chunk.web?.title || uri, url: uri });
+        }
+      }
+
+      return { title, markdown, sources };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+/** Researches a topic (grounded with Google Search when the model
+ * supports it) and writes it up as a Markdown document. Falls back to a
+ * plain (non-grounded) generation if the search tool isn't accepted by
+ * any available model, rather than failing outright — a document from
+ * the model's own knowledge still beats no document. Whoever calls this
+ * (the WhatsApp bridge) is responsible for turning the Markdown into
+ * whatever file format it actually sends. */
+export async function generateDocument(
+  topic: string,
+  context?: string
+): Promise<DocumentResult | null> {
+  if (!topic.trim()) return null;
+  return (
+    (await tryGenerateDocument(topic, context, true)) ??
+    (await tryGenerateDocument(topic, context, false))
+  );
+}
+
 const SYSTEM_PROMPT =
   "You are LEO, the always-on AI operator for SmartLabs. You help staff with " +
   "daily to-dos, leads, ad performance, SEO, LMS admin, and scheduling. Keep " +

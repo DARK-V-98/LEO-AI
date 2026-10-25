@@ -13,6 +13,7 @@ import fs from "fs";
 import * as chrono from "chrono-node";
 import ffmpegPath from "ffmpeg-static";
 import { spawn } from "child_process";
+import PDFDocument from "pdfkit";
 
 // --- Firebase Admin ------------------------------------------------------
 // Paste the full service account JSON (Firebase console -> Project
@@ -810,6 +811,7 @@ const BASE_HELP_LINES = [
   '• "remind me in 20 minutes to <note>" or "remind me tomorrow at 9am to <note>" — I’ll DM you back at that time.',
   '• "tell group <name>: <message>" — sends to that group now, or schedules it if you include a time.',
   '• "poll: <question>? <option>, <option>, ..." — sends a poll to this chat.',
+  '• "write a document about <topic>" / "document: <topic>" / "report on <topic>" — I\'ll research it (live web search when I can) and send back an actual PDF.',
   '• "remember that <fact>" — teaches me something to keep in mind going forward.',
   '• "what do you remember about me" / "forget about me" — check or clear what I know about you.',
   "• Send a voice note, photo, or document (PDF) and I'll read/listen and respond — works as a reply to earlier media too. Send a voice note and I'll reply with one too; say \"reply with voice\" anytime to get a voice note back.",
@@ -1045,6 +1047,110 @@ async function generatePoster(prompt, referenceImage) {
     throw new Error(body?.error || `Image generation failed (HTTP ${res.status})`);
   }
   return res.json(); // { image: base64, mimeType, model }
+}
+
+// --- Document generation -------------------------------------------------
+// Anyone (not just admins) can ask LEO to research a topic — from whatever
+// was said in this chat/group, or anything else — and get back an actual
+// document, instead of just a chat reply. The research itself happens on
+// the website side (generateDocument in llmRouter.ts, grounded with Google
+// Search when the model supports it); this worker's job is turning the
+// Markdown that comes back into a real PDF file to send.
+
+// "document: <topic>" / "report: <topic>" shorthand, same style as poster:
+const DOCUMENT_SHORTHAND_PATTERN = /\b(?:documents?|reports?)\b\s*(?:on|about|for)?\s*[:\-]\s*(.+)/i;
+// "write/make/create/draft/prepare (me) a document/report/article about
+// <topic>", optionally led by "research ... and" (e.g. "research the new
+// AI regulations and write a report").
+const DOCUMENT_VERBOSE_PATTERN =
+  /\b(?:research\s+.+?\s+and\s+)?(?:write|make|create|prepare|draft|generate)\s+(?:me\s+)?(?:a\s+)?(?:document|report|article|write-?up)\s*(?:on|about|for|regarding)?\s*[:\-]?\s*(.+)/i;
+
+function parseDocumentRequest(text) {
+  const shorthand = text.match(DOCUMENT_SHORTHAND_PATTERN);
+  if (shorthand) return shorthand[1].trim();
+  const verbose = text.match(DOCUMENT_VERBOSE_PATTERN);
+  if (verbose) return verbose[1].trim();
+  return null;
+}
+
+async function generateDocumentOnTopic(topic, context) {
+  if (!WEB_BASE_URL) {
+    throw new Error("LEO_WEB_BASE_URL is not set");
+  }
+  const res = await fetch(`${WEB_BASE_URL}/api/document`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic, context: context || undefined }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `Document generation failed (HTTP ${res.status})`);
+  }
+  return res.json(); // { title, markdown, sources: [{title, url}] }
+}
+
+function slugifyFileName(text) {
+  return (
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "document"
+  );
+}
+
+/** Turns LEO's researched Markdown into an actual PDF — a light hand-rolled
+ * renderer (headings, bullets, paragraphs, a linked sources list), not a
+ * full Markdown engine, which is all a one-off research doc going out over
+ * WhatsApp actually needs. */
+function renderDocumentPdf(title, markdown, sources) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 50 });
+    const chunks = [];
+    doc.on("data", (c) => chunks.push(c));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    doc.font("Helvetica-Bold").fontSize(20).text(title);
+    doc.moveDown(1);
+
+    for (const rawLine of markdown.split("\n")) {
+      const line = rawLine.trimEnd();
+      if (/^#\s+/.test(line)) continue; // already rendered as the title above
+      if (/^##\s+/.test(line)) {
+        doc.moveDown(0.5);
+        doc.font("Helvetica-Bold").fontSize(14).text(line.replace(/^##\s+/, ""));
+        doc.moveDown(0.2);
+      } else if (/^#{3,}\s+/.test(line)) {
+        doc.font("Helvetica-Bold").fontSize(12).text(line.replace(/^#{3,}\s+/, ""));
+      } else if (/^[-*]\s+/.test(line)) {
+        doc
+          .font("Helvetica")
+          .fontSize(11)
+          .text(`•  ${line.replace(/^[-*]\s+/, "")}`, { indent: 15 });
+      } else if (!line.trim()) {
+        doc.moveDown(0.4);
+      } else {
+        doc.font("Helvetica").fontSize(11).text(line.replace(/\*\*/g, ""));
+      }
+    }
+
+    if (sources && sources.length > 0) {
+      doc.moveDown(1);
+      doc.font("Helvetica-Bold").fontSize(14).text("Sources");
+      doc.moveDown(0.3);
+      for (const s of sources) {
+        doc
+          .font("Helvetica")
+          .fontSize(10)
+          .fillColor("#1a56db")
+          .text(s.title || s.url, { link: s.url, underline: true });
+      }
+      doc.fillColor("black");
+    }
+
+    doc.end();
+  });
 }
 
 // --- Voice replies ----------------------------------------------------
@@ -1421,12 +1527,22 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch
             ? askText.match(POSTER_PATTERN)
             : null;
+        const documentTopic =
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !posterMatch
+            ? parseDocumentRequest(askText)
+            : null;
         const reminder =
-          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !documentTopic
             ? parseReminder(askText)
             : null;
         const groupSend =
-          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !reminder
+          !rememberMatch &&
+          !whatRemember &&
+          !forgetMe &&
+          !enrollmentCommand &&
+          !pollMatch &&
+          !documentTopic &&
+          !reminder
             ? parseGroupSend(askText)
             : null;
 
@@ -1576,6 +1692,44 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           } catch (err) {
             const errText = `Couldn't generate that poster — ${err.message || "try again shortly"}.`;
             await activeSock.sendMessage(remoteJid, { text: errText });
+            remember(remoteJid, "assistant", errText);
+          }
+        } else if (documentTopic) {
+          try {
+            // Research + a real PDF genuinely takes a while — say so up
+            // front rather than leaving the chat silent.
+            await sendWorkingNotice(
+              activeSock,
+              remoteJid,
+              "📝 Researching that and writing it up — this can take a minute…"
+            );
+            const context = await getCompanyContext(senderJid);
+            const result = await generateDocumentOnTopic(documentTopic, context);
+            const pdfBuffer = await renderDocumentPdf(result.title, result.markdown, result.sources);
+            const sourceNote = result.sources?.length
+              ? ` (${result.sources.length} source${result.sources.length === 1 ? "" : "s"})`
+              : "";
+            const caption = `Here's your document: "${result.title}"${sourceNote}.`;
+            await activeSock.sendMessage(remoteJid, {
+              document: pdfBuffer,
+              fileName: `${slugifyFileName(result.title)}.pdf`,
+              mimetype: "application/pdf",
+              caption,
+            });
+            remember(remoteJid, "assistant", caption);
+            await db
+              .collection("activity")
+              .add({
+                title: "Generated a document on WhatsApp",
+                detail: result.title.slice(0, 60),
+                type: "ok",
+                createdAt: Date.now(),
+              })
+              .catch(() => {});
+          } catch (err) {
+            console.error("Document generation failed:", err);
+            const errText = `Couldn't put that document together — ${err.message || "try again shortly"}.`;
+            await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
             remember(remoteJid, "assistant", errText);
           }
         } else if (/\bremind me\b/i.test(askText) && !reminder) {

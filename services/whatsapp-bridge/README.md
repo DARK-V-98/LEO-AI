@@ -43,6 +43,22 @@ dates, not the AI — so these are fast and don't cost an AI call):
     downloads it and passes it to Gemini as a style/branding/layout
     reference for the new poster, verified to actually carry over
     colors, branding and layout, not just be ignored.
+- **Documents**: `write a document about <topic>`, `document: <topic>`,
+  `report on <topic>`, or `research <topic> and write a report` — LEO
+  researches it (grounded with live Google Search when the model
+  supports it, falling back to its own knowledge if that tool isn't
+  accepted) and sends back a real PDF, not just a chat wall of text.
+  Open to any chat/group, not admin-only — it's a general research
+  tool, not an LMS action. The research call goes through the
+  dashboard's `/api/document` route (needs `LEO_WEB_BASE_URL` set,
+  same as posters); the Markdown that comes back is rendered into a
+  PDF right here in the bridge with `pdfkit` (headings, bullets,
+  paragraphs, a linked sources list when search grounding returned
+  any) — no external PDF service needed. Whatever context LEO already
+  has for this chat (company facts, who's asking, the real course
+  catalog when LMS is configured) is included, so a document can build
+  on something said earlier in the conversation, not just the bare
+  topic string.
 - **Reminders**: `remind me in 20 minutes to call the vendor` or
   `remind me tomorrow at 9am to send the SEO report` — LEO replies
   confirming the time, then DMs you back at that time. If no time is
@@ -202,10 +218,10 @@ that ...", or edit the `companyKnowledge` collection directly in the
 Firebase console.
 
 These are checked in this order: help, "what do you remember"/"forget
-me", remember, poll, poster, reminder, then group-send, then falls
-through to a normal AI chat reply (where lead/task logging can kick in
-via tool-calling) — so a message needs to clearly match one of the
-keyword patterns above to trigger it instead of being handled
+me", remember, poll, poster, document, reminder, then group-send, then
+falls through to a normal AI chat reply (where lead/task logging can
+kick in via tool-calling) — so a message needs to clearly match one of
+the keyword patterns above to trigger it instead of being handled
 conversationally. Reminders and scheduled group messages are stored in
 Firestore (`scheduledMessages`) and a 20-second-interval check inside
 this same worker sends them once due — no separate cron job needed.
@@ -227,9 +243,10 @@ big final block:
   a short beat apart, instead of one wall of text — capped at 4 so it
   never floods a chat.
 - Before something that genuinely takes a few seconds — generating a
-  poster, synthesizing a voice reply, or an LMS admin command that makes
-  one or more real network calls — he sends a quick "working on it"
-  message first, so the chat doesn't just go silent while that happens.
+  poster, researching and writing a document, synthesizing a voice
+  reply, or an LMS admin command that makes one or more real network
+  calls — he sends a quick "working on it" message first, so the chat
+  doesn't just go silent while that happens.
 
 **Viewing chats on the dashboard**: every DM and group chat is visible
 on the website's Admin tab (`whatsappChats` in Firestore) — restricted
