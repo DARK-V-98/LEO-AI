@@ -58,7 +58,22 @@ dates, not the AI — so these are fast and don't cost an AI call):
   has for this chat (company facts, who's asking, the real course
   catalog when LMS is configured) is included, so a document can build
   on something said earlier in the conversation, not just the bare
-  topic string.
+  topic string. The PDF itself is actually designed, not a plain text
+  dump — a colored cover band with the title, accent-colored section
+  headings with a rule under each, real hanging-indent bullets (a drawn
+  dot, not a "• " text prefix), a slim continuation header on any page
+  after the first, and a page-numbered footer, all hand-rolled with
+  `pdfkit` (no external design/PDF service).
+  - **Revising a document**: once LEO's sent one in a chat, `"update
+    the document to also include <X>"`, `"add <X> to that document"`,
+    or `"edit the document: remove <X>"` sends the current Markdown
+    back to Gemini with just that instruction, asks it to apply only
+    that change and return the complete updated document, then
+    re-renders and re-sends the whole PDF — not a diff, a fresh file
+    each time. LEO remembers the last document per chat for an hour;
+    after that (or if nothing's been generated yet in that chat), an
+    "update the document" message is just treated as normal
+    conversation instead of being mistaken for a revision request.
 - **Reminders**: `remind me in 20 minutes to call the vendor` or
   `remind me tomorrow at 9am to send the SEO report` — LEO replies
   confirming the time, then DMs you back at that time. If no time is

@@ -102,19 +102,19 @@ const DOCUMENT_SYSTEM_PROMPT =
   "out with filler sections. Write in whichever language the request " +
   "itself was written in.";
 
-async function tryGenerateDocument(
-  topic: string,
-  context: string | undefined,
+const DOCUMENT_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"];
+
+/** Shared Gemini call for both a fresh document and a revision of one —
+ * the only difference between those two cases is the system prompt and
+ * the user-turn text, both passed in by the caller. */
+async function callGeminiForDocument(
+  systemPrompt: string,
+  prompt: string,
+  fallbackTitle: string,
   useSearch: boolean
 ): Promise<DocumentResult | null> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
-
-  const prompt = context?.trim()
-    ? `${context.trim()}\n\nWrite the document now. Topic: ${topic.trim()}`
-    : `Write the document now. Topic: ${topic.trim()}`;
-
-  const DOCUMENT_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"];
 
   for (const model of DOCUMENT_MODELS) {
     if (!withinGeminiBudget()) return null;
@@ -127,7 +127,7 @@ async function tryGenerateDocument(
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ role: "user", parts: [{ text: prompt }] }],
-            systemInstruction: { parts: [{ text: DOCUMENT_SYSTEM_PROMPT }] },
+            systemInstruction: { parts: [{ text: systemPrompt }] },
             ...(useSearch ? { tools: [{ google_search: {} }] } : {}),
           }),
         }
@@ -144,7 +144,7 @@ async function tryGenerateDocument(
       if (!markdown) continue;
 
       const titleMatch = /^#\s+(.+)$/m.exec(markdown);
-      const title = titleMatch ? titleMatch[1].trim() : topic.trim();
+      const title = titleMatch ? titleMatch[1].trim() : fallbackTitle;
 
       const chunks: Array<{ web?: { uri?: string; title?: string } }> =
         candidate?.groundingMetadata?.groundingChunks ?? [];
@@ -178,9 +178,48 @@ export async function generateDocument(
   context?: string
 ): Promise<DocumentResult | null> {
   if (!topic.trim()) return null;
+  const prompt = context?.trim()
+    ? `${context.trim()}\n\nWrite the document now. Topic: ${topic.trim()}`
+    : `Write the document now. Topic: ${topic.trim()}`;
   return (
-    (await tryGenerateDocument(topic, context, true)) ??
-    (await tryGenerateDocument(topic, context, false))
+    (await callGeminiForDocument(DOCUMENT_SYSTEM_PROMPT, prompt, topic.trim(), true)) ??
+    (await callGeminiForDocument(DOCUMENT_SYSTEM_PROMPT, prompt, topic.trim(), false))
+  );
+}
+
+const DOCUMENT_REVISE_SYSTEM_PROMPT =
+  "You are LEO, revising a document you wrote earlier based on specific " +
+  "feedback. You'll be given the full current document (in Markdown) and " +
+  "an instruction describing exactly what to change. Apply only what was " +
+  "asked — add, remove, or rewrite the specific part requested — and " +
+  "leave everything else in the document exactly as it was; don't " +
+  "rewrite unrelated sections or restructure things that weren't asked " +
+  "about. If a Google Search tool is available and the request needs a " +
+  "fact you don't already have, use it. Return the COMPLETE updated " +
+  "document, not just the changed part, in the same Markdown format: a " +
+  "single '# ' title line, '## ' section headings, short paragraphs, and " +
+  "'- ' bullet lists. Keep the same language the original document is " +
+  "written in, unless the instruction explicitly asks to change it.";
+
+/** Applies a specific requested change to a document LEO already wrote,
+ * returning the complete updated Markdown (not a diff) — so the caller
+ * can just re-render and re-send the whole thing. Same grounded-then-
+ * plain-fallback shape as generateDocument. */
+export async function reviseDocument(
+  previousMarkdown: string,
+  instruction: string,
+  context?: string
+): Promise<DocumentResult | null> {
+  if (!previousMarkdown.trim() || !instruction.trim()) return null;
+  const fallbackTitleMatch = /^#\s+(.+)$/m.exec(previousMarkdown);
+  const fallbackTitle = fallbackTitleMatch ? fallbackTitleMatch[1].trim() : "Updated document";
+  const prompt =
+    (context?.trim() ? `${context.trim()}\n\n` : "") +
+    `Current document:\n\n${previousMarkdown.trim()}\n\n---\n\n` +
+    `Requested change: ${instruction.trim()}\n\nReturn the complete updated document now.`;
+  return (
+    (await callGeminiForDocument(DOCUMENT_REVISE_SYSTEM_PROMPT, prompt, fallbackTitle, true)) ??
+    (await callGeminiForDocument(DOCUMENT_REVISE_SYSTEM_PROMPT, prompt, fallbackTitle, false))
   );
 }
 

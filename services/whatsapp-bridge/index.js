@@ -928,7 +928,7 @@ const BASE_HELP_LINES = [
   '• "remind me in 20 minutes to <note>" or "remind me tomorrow at 9am to <note>" — I’ll DM you back at that time.',
   '• "tell group <name>: <message>" — sends to that group now, or schedules it if you include a time.',
   '• "poll: <question>? <option>, <option>, ..." — sends a poll to this chat.',
-  '• "write a document about <topic>" / "document: <topic>" / "report on <topic>" — I\'ll research it (live web search when I can) and send back an actual PDF.',
+  '• "write a document about <topic>" / "document: <topic>" / "report on <topic>" — I\'ll research it (live web search when I can) and send back a properly designed PDF. Then "update the document to also include..." / "add X to that document" revises and re-sends it.',
   '• "remember that <fact>" — teaches me something to keep in mind going forward.',
   '• "what do you remember about me" / "forget about me" — check or clear what I know about you.',
   "• Send a voice note, photo, or document (PDF) and I'll read/listen and respond — works as a reply to earlier media too. Send a voice note and I'll reply with one too; say \"reply with voice\" anytime to get a voice note back.",
@@ -1219,6 +1219,50 @@ function parseDocumentRequest(text) {
   return null;
 }
 
+// "add/include/remove/change/update X to/from/in that/this/the document" —
+// the instruction comes BEFORE the keyword here, so it needs its own
+// capture (same reasoning as DOCUMENT_RESEARCH_PREFIX_PATTERN above).
+const DOCUMENT_UPDATE_PREFIX_PATTERN =
+  /\b(?:add|include|remove|change|update)\s+(.+?)\s+(?:to|from|in)\s+(?:that|this|the)\s+(?:documents?|reports?|pdfs?|write-?ups?|articles?)\b/i;
+// "update/edit/revise/modify/redo/regenerate/change (that/this/the)
+// document/report/pdf (to/with/and/:) <instruction>" — only fires on a
+// real revision verb aimed at the document itself, so an unrelated
+// mention ("update the drive link for the document") never matches.
+const DOCUMENT_UPDATE_PATTERN =
+  /\b(?:update|edit|revise|modify|redo|regenerate|change)\b.{0,20}?\b(?:that|this|the)?\s*(?:documents?|reports?|pdfs?|write-?ups?|articles?)\b\s*(?:to|with|and|[:\-])?\s*(.+)/i;
+
+function parseDocumentUpdateRequest(text) {
+  const prefixMatch = text.match(DOCUMENT_UPDATE_PREFIX_PATTERN);
+  if (prefixMatch && prefixMatch[1].trim()) return prefixMatch[1].trim();
+  const match = text.match(DOCUMENT_UPDATE_PATTERN);
+  if (match && match[1].trim()) {
+    const cleaned = match[1].trim().replace(/^[,\s:\-]+/, "").trim();
+    return cleaned || null;
+  }
+  return null;
+}
+
+// The last document LEO generated or revised in each chat, so "update
+// that document to also include X" has something to work from instead of
+// starting over. Short-lived, in-memory, same pattern as enrollFlows —
+// fine to lose on a redeploy, not worth persisting to Firestore.
+const LAST_DOCUMENT_TTL_MS = 60 * 60 * 1000;
+const lastDocumentByChat = new Map(); // remoteJid -> { title, markdown, sources, updatedAt }
+
+function getLastDocument(remoteJid) {
+  const doc = lastDocumentByChat.get(remoteJid);
+  if (!doc) return null;
+  if (Date.now() - doc.updatedAt > LAST_DOCUMENT_TTL_MS) {
+    lastDocumentByChat.delete(remoteJid);
+    return null;
+  }
+  return doc;
+}
+
+function setLastDocument(remoteJid, { title, markdown, sources }) {
+  lastDocumentByChat.set(remoteJid, { title, markdown, sources: sources || [], updatedAt: Date.now() });
+}
+
 async function generateDocumentOnTopic(topic, context) {
   if (!WEB_BASE_URL) {
     throw new Error("LEO_WEB_BASE_URL is not set");
@@ -1235,6 +1279,22 @@ async function generateDocumentOnTopic(topic, context) {
   return res.json(); // { title, markdown, sources: [{title, url}] }
 }
 
+async function reviseDocumentOnTopic(previousMarkdown, instruction, context) {
+  if (!WEB_BASE_URL) {
+    throw new Error("LEO_WEB_BASE_URL is not set");
+  }
+  const res = await fetch(`${WEB_BASE_URL}/api/document`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ previousMarkdown, instruction, context: context || undefined }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `Document revision failed (HTTP ${res.status})`);
+  }
+  return res.json(); // { title, markdown, sources: [{title, url}] }
+}
+
 function slugifyFileName(text) {
   return (
     text
@@ -1245,54 +1305,144 @@ function slugifyFileName(text) {
   );
 }
 
-/** Turns LEO's researched Markdown into an actual PDF — a light hand-rolled
- * renderer (headings, bullets, paragraphs, a linked sources list), not a
- * full Markdown engine, which is all a one-off research doc going out over
- * WhatsApp actually needs. */
+const PDF_ACCENT = "#1a56db";
+const PDF_ACCENT_LIGHT = "#dbeafe";
+const PDF_TEXT_DARK = "#111827";
+const PDF_TEXT_GRAY = "#6b7280";
+const PDF_RULE_GRAY = "#e5e7eb";
+const PDF_MARGIN = 56;
+
+/** Turns LEO's researched Markdown into an actual designed PDF — a colored
+ * cover band with the title, accent-colored section headings with a rule
+ * under each, real hanging-indent bullets (a drawn dot, not a "• " text
+ * prefix), a slim continuation header on any page after the first, and a
+ * page-numbered footer. Not a full Markdown engine — a light hand-rolled
+ * renderer, which is all a one-off research doc going out over WhatsApp
+ * actually needs — but one that reads like someone laid it out on purpose
+ * instead of pasting text onto a blank page. */
 function renderDocumentPdf(title, markdown, sources) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 50 });
+    const doc = new PDFDocument({ margin: PDF_MARGIN, bufferPages: true, info: { Title: title } });
     const chunks = [];
     doc.on("data", (c) => chunks.push(c));
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    doc.font("Helvetica-Bold").fontSize(20).text(title);
-    doc.moveDown(1);
+    const contentWidth = doc.page.width - PDF_MARGIN * 2;
+    const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+
+    // A slim continuation header on every page after the first — the cover
+    // band below is deliberately only drawn once. "pageAdded" doesn't fire
+    // for the very first page (pdfkit creates it inside the constructor,
+    // before this listener is attached), so this only catches real overflow.
+    doc.on("pageAdded", () => {
+      doc.font("Helvetica").fontSize(9).fillColor(PDF_TEXT_GRAY);
+      doc.text(title, PDF_MARGIN, 28, { width: contentWidth, lineBreak: false, ellipsis: true });
+      doc
+        .moveTo(PDF_MARGIN, 44)
+        .lineTo(doc.page.width - PDF_MARGIN, 44)
+        .strokeColor(PDF_RULE_GRAY)
+        .lineWidth(0.5)
+        .stroke();
+      doc.x = PDF_MARGIN;
+      doc.y = 60;
+      doc.fillColor(PDF_TEXT_DARK);
+    });
+
+    // Cover band — first page only.
+    doc.rect(0, 0, doc.page.width, 110).fill(PDF_ACCENT);
+    doc.fillColor("white").font("Helvetica-Bold").fontSize(21).text(title, PDF_MARGIN, 36, { width: contentWidth });
+    doc
+      .font("Helvetica")
+      .fontSize(10)
+      .fillColor(PDF_ACCENT_LIGHT)
+      .text(`SmartLabs • Prepared by LEO • ${today}`, PDF_MARGIN, doc.y + 6);
+    doc.fillColor(PDF_TEXT_DARK);
+    doc.x = PDF_MARGIN;
+    doc.y = 132;
+
+    function drawBullet(text) {
+      const textIndent = 14;
+      const dotY = doc.y + 5.5;
+      doc.save();
+      doc.circle(PDF_MARGIN + 2.5, dotY, 2).fill(PDF_ACCENT);
+      doc.restore();
+      doc
+        .font("Helvetica")
+        .fontSize(11)
+        .fillColor(PDF_TEXT_DARK)
+        .text(text, PDF_MARGIN + textIndent, doc.y, { width: contentWidth - textIndent, lineGap: 2 });
+    }
 
     for (const rawLine of markdown.split("\n")) {
       const line = rawLine.trimEnd();
-      if (/^#\s+/.test(line)) continue; // already rendered as the title above
+      if (/^#\s+/.test(line)) continue; // already rendered in the cover band above
+      const clean = (s) => s.replace(/\*\*/g, "");
       if (/^##\s+/.test(line)) {
+        doc.moveDown(0.7);
+        const headingText = clean(line.replace(/^##\s+/, ""));
+        doc.font("Helvetica-Bold").fontSize(14).fillColor(PDF_ACCENT).text(headingText, { width: contentWidth });
+        const underlineY = doc.y + 1;
+        doc
+          .moveTo(PDF_MARGIN, underlineY)
+          .lineTo(PDF_MARGIN + Math.min(doc.widthOfString(headingText) + 4, contentWidth), underlineY)
+          .strokeColor(PDF_ACCENT)
+          .lineWidth(1)
+          .stroke();
         doc.moveDown(0.5);
-        doc.font("Helvetica-Bold").fontSize(14).text(line.replace(/^##\s+/, ""));
-        doc.moveDown(0.2);
+        doc.fillColor(PDF_TEXT_DARK);
       } else if (/^#{3,}\s+/.test(line)) {
-        doc.font("Helvetica-Bold").fontSize(12).text(line.replace(/^#{3,}\s+/, ""));
+        doc.moveDown(0.3);
+        doc.font("Helvetica-Bold").fontSize(12).fillColor(PDF_TEXT_DARK).text(clean(line.replace(/^#{3,}\s+/, "")), {
+          width: contentWidth,
+        });
+        doc.moveDown(0.2);
       } else if (/^[-*]\s+/.test(line)) {
+        drawBullet(clean(line.replace(/^[-*]\s+/, "")));
+      } else if (!line.trim()) {
+        doc.moveDown(0.45);
+      } else {
         doc
           .font("Helvetica")
           .fontSize(11)
-          .text(`•  ${line.replace(/^[-*]\s+/, "")}`, { indent: 15 });
-      } else if (!line.trim()) {
-        doc.moveDown(0.4);
-      } else {
-        doc.font("Helvetica").fontSize(11).text(line.replace(/\*\*/g, ""));
+          .fillColor(PDF_TEXT_DARK)
+          .text(clean(line), { width: contentWidth, lineGap: 2 });
       }
     }
 
     if (sources && sources.length > 0) {
       doc.moveDown(1);
-      doc.font("Helvetica-Bold").fontSize(14).text("Sources");
+      doc.font("Helvetica-Bold").fontSize(13).fillColor(PDF_ACCENT).text("Sources", { width: contentWidth });
       doc.moveDown(0.3);
       for (const s of sources) {
         doc
           .font("Helvetica")
-          .fontSize(10)
-          .fillColor("#1a56db")
-          .text(s.title || s.url, { link: s.url, underline: true });
+          .fontSize(9.5)
+          .fillColor(PDF_ACCENT)
+          .text(s.title || s.url, { link: s.url, underline: true, width: contentWidth });
       }
-      doc.fillColor("black");
+      doc.fillColor(PDF_TEXT_DARK);
+    }
+
+    // Page-numbered footer on every page, added last via bufferPages so the
+    // total page count is already known. Writing this low on the page sits
+    // below pdfkit's own bottom-margin boundary, which would otherwise read
+    // it as an overflow and silently add a trailing blank page — dropping
+    // the bottom margin to 0 for just these calls avoids that.
+    const range = doc.bufferedPageRange();
+    const savedBottomMargin = doc.page.margins.bottom;
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      doc.page.margins.bottom = 0;
+      const bottom = doc.page.height - 36;
+      doc.font("Helvetica").fontSize(8).fillColor(PDF_TEXT_GRAY);
+      doc.text("SmartLabs • Generated by LEO", PDF_MARGIN, bottom, { width: 220, lineBreak: false });
+      doc.text(`Page ${i - range.start + 1} of ${range.count}`, doc.page.width - PDF_MARGIN - 150, bottom, {
+        width: 150,
+        align: "right",
+        lineBreak: false,
+      });
+      doc.page.margins.bottom = savedBottomMargin;
     }
 
     doc.end();
@@ -1673,12 +1823,32 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch
             ? askText.match(POSTER_PATTERN)
             : null;
+        // Only treated as a revision request when there's actually a
+        // document to revise in this chat — otherwise an unrelated
+        // sentence that happens to say "update the document" just falls
+        // through to normal chat instead of hijacking it.
+        const documentUpdateInstruction =
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !posterMatch && getLastDocument(remoteJid)
+            ? parseDocumentUpdateRequest(askText)
+            : null;
         const documentTopic =
-          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !posterMatch
+          !rememberMatch &&
+          !whatRemember &&
+          !forgetMe &&
+          !enrollmentCommand &&
+          !pollMatch &&
+          !posterMatch &&
+          !documentUpdateInstruction
             ? parseDocumentRequest(askText)
             : null;
         const reminder =
-          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !documentTopic
+          !rememberMatch &&
+          !whatRemember &&
+          !forgetMe &&
+          !enrollmentCommand &&
+          !pollMatch &&
+          !documentUpdateInstruction &&
+          !documentTopic
             ? parseReminder(askText)
             : null;
         const groupSend =
@@ -1687,6 +1857,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !forgetMe &&
           !enrollmentCommand &&
           !pollMatch &&
+          !documentUpdateInstruction &&
           !documentTopic &&
           !reminder
             ? parseGroupSend(askText)
@@ -1840,6 +2011,40 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             await activeSock.sendMessage(remoteJid, { text: errText });
             remember(remoteJid, "assistant", errText);
           }
+        } else if (documentUpdateInstruction) {
+          try {
+            const previousDoc = getLastDocument(remoteJid);
+            await sendWorkingNotice(activeSock, remoteJid, "📝 Updating that document — this can take a minute…");
+            const context = await getCompanyContext(senderJid);
+            const result = await reviseDocumentOnTopic(previousDoc.markdown, documentUpdateInstruction, context);
+            const pdfBuffer = await renderDocumentPdf(result.title, result.markdown, result.sources);
+            setLastDocument(remoteJid, result);
+            const sourceNote = result.sources?.length
+              ? ` (${result.sources.length} source${result.sources.length === 1 ? "" : "s"})`
+              : "";
+            const caption = `Updated: "${result.title}"${sourceNote}.`;
+            await activeSock.sendMessage(remoteJid, {
+              document: pdfBuffer,
+              fileName: `${slugifyFileName(result.title)}.pdf`,
+              mimetype: "application/pdf",
+              caption,
+            });
+            remember(remoteJid, "assistant", caption);
+            await db
+              .collection("activity")
+              .add({
+                title: "Revised a document on WhatsApp",
+                detail: `${result.title.slice(0, 60)} — ${documentUpdateInstruction.slice(0, 60)}`,
+                type: "ok",
+                createdAt: Date.now(),
+              })
+              .catch(() => {});
+          } catch (err) {
+            console.error("Document revision failed:", err);
+            const errText = `Couldn't update that document — ${err.message || "try again shortly"}.`;
+            await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
+            remember(remoteJid, "assistant", errText);
+          }
         } else if (documentTopic) {
           try {
             // Research + a real PDF genuinely takes a while — say so up
@@ -1852,10 +2057,11 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             const context = await getCompanyContext(senderJid);
             const result = await generateDocumentOnTopic(documentTopic, context);
             const pdfBuffer = await renderDocumentPdf(result.title, result.markdown, result.sources);
+            setLastDocument(remoteJid, result);
             const sourceNote = result.sources?.length
               ? ` (${result.sources.length} source${result.sources.length === 1 ? "" : "s"})`
               : "";
-            const caption = `Here's your document: "${result.title}"${sourceNote}.`;
+            const caption = `Here's your document: "${result.title}"${sourceNote}. Ask me to update it anytime — e.g. "update the document to also include...".`;
             await activeSock.sendMessage(remoteJid, {
               document: pdfBuffer,
               fileName: `${slugifyFileName(result.title)}.pdf`,
