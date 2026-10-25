@@ -126,6 +126,20 @@ dates, not the AI — so these are fast and don't cost an AI call):
   naturally shared with that group already, same as WhatsApp itself.
   This is what gives LEO conversational memory ("what did I just ask")
   and lets it survive a restart/redeploy.
+  - **Telling people apart in a group**: every line saved from a group
+    is labeled with who actually sent it ("Vishwa: ...", "Lahiruka:
+    ..."), and the context sent for each reply names specifically who
+    the current message is from and says plainly that other people in
+    the group are not the same person — fixing a real bug where LEO had
+    no way to distinguish group members at all (no per-sender label in
+    history, and the "who am I talking to" lookup was keyed by the
+    group's own JID instead of the actual sender, so it silently never
+    matched anyone). Two different people messaging within the same
+    3-second window used to get merged into one admin/sender-attributed
+    turn too — the rapid-fire message buffer is now keyed per sender,
+    not just per chat, so that can't happen anymore. A lead or task
+    logged from a group conversation is attributed to whoever actually
+    sent that message, not the group itself.
 - **"remember that \<fact\>"** — e.g. `remember that our office closes at
   5pm on Fridays` — on top of the above, this *deliberately* promotes
   something to permanent company knowledge (`companyKnowledge`),

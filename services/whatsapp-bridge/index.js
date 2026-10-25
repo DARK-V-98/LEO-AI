@@ -840,7 +840,28 @@ async function seedKnowledgeIfEmpty() {
   }
 }
 
-async function getCompanyContext(senderJid) {
+/** Looks up how to address a JID — their saved name/role if they've ever
+ * introduced themselves, or null if not. Used both for the "who's
+ * talking" context line and for labeling individual messages in a
+ * group's shared history. */
+async function lookupPerson(jid) {
+  try {
+    const doc = await PEOPLE.doc(jid).get();
+    return doc.exists ? doc.data() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A short display label for a JID in group history/logs — their saved
+ * name if known, otherwise their bare phone number (never the raw JID
+ * suffix). */
+async function personLabel(jid) {
+  const p = await lookupPerson(jid);
+  return p?.name || jid.split("@")[0];
+}
+
+async function getCompanyContext(senderJid, isGroup) {
   const lines = [];
   try {
     const knowledgeSnap = await KNOWLEDGE.get();
@@ -850,11 +871,24 @@ async function getCompanyContext(senderJid) {
       for (const f of facts) lines.push(`- ${f}`);
     }
 
-    const personDoc = await PEOPLE.doc(senderJid).get();
-    if (personDoc.exists) {
-      const p = personDoc.data();
+    const person = await lookupPerson(senderJid);
+    if (isGroup) {
+      // Several different people share this one conversation — the
+      // message that triggered this reply is specifically the one from
+      // whoever's named below, not "the group" as a single person. Lines
+      // in the recent history are labeled "Name: message" for exactly
+      // this reason — never assume two differently-labeled lines are the
+      // same person, and never attribute one person's message, request,
+      // or detail (a lead, a name, a number) to someone else in the group.
       lines.push(
-        `\nYou're talking to ${p.name}${p.role ? `, ${p.role}` : ""}. Address them by name naturally, don't re-ask who they are.`
+        `\nThis is a group chat with several different people. The message you're ` +
+          `replying to right now was sent by ${person ? `${person.name}${person.role ? `, ${person.role}` : ""}` : "someone who hasn't introduced themselves yet"} ` +
+          `— address your reply to them specifically, not the group as a whole, and don't assume ` +
+          `anyone else in the group is the same person.`
+      );
+    } else if (person) {
+      lines.push(
+        `\nYou're talking to ${person.name}${person.role ? `, ${person.role}` : ""}. Address them by name naturally, don't re-ask who they are.`
       );
     }
 
@@ -1016,12 +1050,18 @@ async function executeActions(actions, byJid) {
   }
 }
 
-async function askLeo(jid, attachment) {
+// jid is the chat whose shared history/reply this is (a DM's own JID, or
+// a group's JID — the group's transcript is one shared conversation,
+// same as WhatsApp itself shows it); senderJid is specifically whoever
+// sent the message being replied to right now, which in a group is NOT
+// the same as jid — getCompanyContext and action attribution (a lead/task
+// logged from this message) both need the actual person, not the group.
+async function askLeo(jid, senderJid, isGroup, attachment) {
   if (!WEB_BASE_URL) {
     return "I'm not fully set up to chat here yet — ask the team to finish the WhatsApp setup (LEO_WEB_BASE_URL).";
   }
   try {
-    const context = await getCompanyContext(jid);
+    const context = await getCompanyContext(senderJid, isGroup);
     const res = await fetch(`${WEB_BASE_URL}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1035,7 +1075,7 @@ async function askLeo(jid, attachment) {
     const reply = data?.reply || "Sorry, I didn't catch that — could you say it again?";
     remember(jid, "assistant", reply);
     if (Array.isArray(data?.actions) && data.actions.length > 0) {
-      await executeActions(data.actions, jid);
+      await executeActions(data.actions, senderJid);
     }
     return reply;
   } catch (err) {
@@ -1776,7 +1816,14 @@ async function maybeSendDailyDigest() {
 // through the same dispatch logic (and the same last-20-messages
 // context) as a single message would be.
 const TURN_DEBOUNCE_MS = 3000;
-const pendingTurns = new Map(); // remoteJid -> { parts, senderJid, isGroup, representativeMsg, timer }
+// Keyed by remoteJid+senderJid, not remoteJid alone — in a group, two
+// different people can easily both message within the same 3-second
+// window, and combining them under one key would merge person B's
+// message into person A's turn (wrong sender, wrong admin check, wrong
+// "who's talking" context — the exact "LEO thinks everyone's the same
+// person" bug). Each person's own rapid-fire burst still combines
+// correctly; different people's messages never do.
+const pendingTurns = new Map(); // "remoteJid:senderJid" -> { parts, senderJid, isGroup, representativeMsg, timer }
 
 async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText, msg }) {
   try {
@@ -1796,7 +1843,13 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             ? "[document]"
             : "";
     const historyText = askText || attachmentPlaceholder;
-    remember(remoteJid, "user", historyText);
+    // A group's history is one shared transcript with several different
+    // people in it — label each line with who actually said it, so the
+    // model (and anyone reading whatsappChats on the dashboard) can tell
+    // them apart instead of seeing one undifferentiated stream of "user"
+    // messages. A DM only ever has one other person, so no label needed.
+    const storedHistoryText = isGroup ? `${await personLabel(senderJid)}: ${historyText}` : historyText;
+    remember(remoteJid, "user", storedHistoryText);
 
     // Learn who's speaking, silently — never changes what gets replied.
     maybeLearnIntroduction(senderJid, askText).catch(() => {});
@@ -2015,7 +2068,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           try {
             const previousDoc = getLastDocument(remoteJid);
             await sendWorkingNotice(activeSock, remoteJid, "📝 Updating that document — this can take a minute…");
-            const context = await getCompanyContext(senderJid);
+            const context = await getCompanyContext(senderJid, isGroup);
             const result = await reviseDocumentOnTopic(previousDoc.markdown, documentUpdateInstruction, context);
             const pdfBuffer = await renderDocumentPdf(result.title, result.markdown, result.sources);
             setLastDocument(remoteJid, result);
@@ -2054,7 +2107,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
               remoteJid,
               "📝 Researching that and writing it up — this can take a minute…"
             );
-            const context = await getCompanyContext(senderJid);
+            const context = await getCompanyContext(senderJid, isGroup);
             const result = await generateDocumentOnTopic(documentTopic, context);
             const pdfBuffer = await renderDocumentPdf(result.title, result.markdown, result.sources);
             setLastDocument(remoteJid, result);
@@ -2163,7 +2216,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             remember(remoteJid, "assistant", errText);
           }
         } else {
-          const reply = await askLeo(remoteJid, attachment);
+          const reply = await askLeo(remoteJid, senderJid, isGroup, attachment);
 
           // Reply with a voice note instead of text when: the incoming
           // message was itself a voice note (hands-free, symmetric — you
@@ -2239,10 +2292,11 @@ function attachMessageHandler(activeSock) {
 
         await activeSock.sendPresenceUpdate("composing", remoteJid).catch(() => {});
 
-        let entry = pendingTurns.get(remoteJid);
+        const turnKey = `${remoteJid}:${senderJid}`;
+        let entry = pendingTurns.get(turnKey);
         if (!entry) {
           entry = { parts: [], senderJid, isGroup, representativeMsg: msg, timer: null };
-          pendingTurns.set(remoteJid, entry);
+          pendingTurns.set(turnKey, entry);
         }
         if (askText) entry.parts.push(askText);
         // Prefer a message that actually carries (or quotes) media over a
@@ -2254,7 +2308,7 @@ function attachMessageHandler(activeSock) {
 
         if (entry.timer) clearTimeout(entry.timer);
         entry.timer = setTimeout(() => {
-          pendingTurns.delete(remoteJid);
+          pendingTurns.delete(turnKey);
           const combinedText = entry.parts.join("\n").trim();
           if (!combinedText && !entry.representativeMsg) return;
           processTurn(activeSock, {
