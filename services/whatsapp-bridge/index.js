@@ -82,6 +82,43 @@ async function callLms(path, { method = "GET", body } = {}) {
 
 const lmsFindStudents = (q) => callLms(`/api/leo/students?q=${encodeURIComponent(q)}`).then((d) => d.students || []);
 const lmsListCourses = () => callLms("/api/leo/courses").then((d) => d.courses || []);
+
+// Cached course catalog, injected into every chat's context (see
+// getCompanyContext) so ordinary questions like "do you have a Python
+// course" are grounded in what's actually offered instead of the model
+// guessing/inventing a course name. A short TTL since the catalog barely
+// changes but we don't want every single message hitting the LMS.
+const COURSE_CACHE_TTL_MS = 5 * 60 * 1000;
+let courseCache = { fetchedAt: 0, courses: [] };
+
+async function getLmsCoursesCached() {
+  if (Date.now() - courseCache.fetchedAt < COURSE_CACHE_TTL_MS) return courseCache.courses;
+  try {
+    const courses = await lmsListCourses();
+    courseCache = { fetchedAt: Date.now(), courses };
+    return courses;
+  } catch (err) {
+    console.error("Failed to refresh LMS course cache:", err);
+    return courseCache.courses; // stale (possibly empty) fallback rather than failing the whole reply
+  }
+}
+
+function formatCourseContext(courses) {
+  if (!courses.length) return "";
+  const lines = courses.map((c) => {
+    const batches = (c.batches || [])
+      .map((b) => `${b.name} (${b.status}${b.maxStudents ? `, ${b.enrolledCount}/${b.maxStudents}` : ""})`)
+      .join("; ");
+    return `- ${c.title}${c.category ? ` [${c.category}]` : ""}: ${batches || "no open batches listed"}`;
+  });
+  return (
+    "Real courses SmartLabs currently offers (from the LMS — this is the " +
+    "complete, authoritative list; never mention or confirm a course that " +
+    "isn't here, and if asked about one that isn't listed, say plainly " +
+    "it's not currently offered rather than guessing):\n" +
+    lines.join("\n")
+  );
+}
 const lmsListPendingEnrollments = () =>
   callLms("/api/leo/enrollments/pending").then((d) => d.enrollments || []);
 const lmsApprove = (enrollmentId, adminPhoneNumber) =>
@@ -438,6 +475,12 @@ async function getCompanyContext(senderJid) {
       lines.push(
         `\nYou're talking to ${p.name}${p.role ? `, ${p.role}` : ""}. Address them by name naturally, don't re-ask who they are.`
       );
+    }
+
+    if (LMS_BASE_URL && LMS_API_KEY) {
+      const courses = await getLmsCoursesCached();
+      const courseContext = formatCourseContext(courses);
+      if (courseContext) lines.push(`\n${courseContext}`);
     }
   } catch (err) {
     console.error("Failed to load company context:", err);

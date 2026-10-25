@@ -117,7 +117,13 @@ const SYSTEM_PROMPT =
   "way a person continuing a conversation sends a couple of messages " +
   "in a row rather than one big block — use that naturally for a " +
   "multi-part answer (e.g. a quick acknowledgement, then the actual " +
-  "result), but don't force a split where one short reply is enough.";
+  "result), but don't force a split where one short reply is enough. " +
+  "If you're given a list of real courses SmartLabs currently offers, " +
+  "treat it as the complete, authoritative catalog — never mention, " +
+  "confirm, or imply a course exists if it isn't on that list, even if " +
+  "it sounds like something a place like this would plausibly teach. " +
+  "If asked about a course that isn't listed, say plainly it's not " +
+  "currently offered rather than guessing or inventing details about it.";
 
 // Free-tier OpenRouter models, tried in order until one responds. Picked
 // from a live /api/admin/openrouter-models check (not from training-data
