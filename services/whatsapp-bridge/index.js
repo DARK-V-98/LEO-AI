@@ -150,6 +150,26 @@ async function handleListPendingCommand() {
   return `${pending.length} pending enrollment${pending.length === 1 ? "" : "s"}:\n${lines.join("\n")}${suffix}`;
 }
 
+// "check student <name/email/phone>" — a direct lookup, not tied to a
+// pending request. The students endpoint only returns course/batch IDs,
+// not titles, so this reports counts rather than making extra round-trips
+// to resolve names for what's meant to be a quick lookup.
+async function handleFindStudentCommand(query) {
+  if (!query) {
+    return "Who should I look up? Give me a name, email, or phone number — e.g. \"check student nimal@email.com\".";
+  }
+  const students = await lmsFindStudents(query);
+  if (students.length === 0) {
+    return `Couldn't find a student matching "${query}".`;
+  }
+  if (students.length === 1) {
+    const s = students[0];
+    return `${s.name} (${s.email}${s.contact ? `, ${s.contact}` : ""}) — enrolled in ${s.enrolledCourses?.length || 0} course${s.enrolledCourses?.length === 1 ? "" : "s"}, ${s.enrolledBatches?.length || 0} batch${s.enrolledBatches?.length === 1 ? "" : "es"}.`;
+  }
+  const lines = students.map((s) => `• ${s.name} (${s.email})`);
+  return `Found ${students.length} students matching "${query}":\n${lines.join("\n")}`;
+}
+
 // approve / reject / remove all key off the same pending-enrollment lookup
 // (see findMatchingPendingEnrollments) — remove only resolves a *pending*
 // request this way; removing an already-active student by name isn't
@@ -493,6 +513,7 @@ const ADMIN_HELP_LINES = [
   "",
   "Admin-only (your number has this — LMS actions):",
   '• "check enrollments" — lists what\'s actually pending right now.',
+  '• "check student <name/email/phone>" — looks up a student directly.',
   '• "approve <student> [for <course>]" / "reject <student>[: <reason>]" — decides a pending enrollment request.',
   '• "enroll <student> in <course>" — grants immediate course/batch access, skipping the pending step.',
   '• "remove <student> from <course>" — bans their pending request (doesn\'t touch an already-active student yet).',
@@ -635,10 +656,19 @@ const REMOVE_PATTERN = /^\s*remove\s+(.+?)\s+from\s+(.+?)\s*$/i;
 // takes no student/course argument and the other patterns wouldn't match
 // this phrasing anyway.
 const CHECK_ENROLLMENTS_PATTERN = /^\s*(?:check|list|show)\s+(?:the\s+)?(?:pending\s+)?enrollments?\b/i;
+// "check student <name/email/phone>" / "find student ..." / "look up
+// student's email ..." — a direct student lookup, independent of
+// enrollments. The capture group is whatever's left after "student(s)",
+// which may be empty ("check students") if no identifier was given.
+const CHECK_STUDENT_PATTERN = /^\s*(?:check|find|look\s*up|search(?:\s+for)?)\s+(?:the\s+)?student('s)?s?\s*(.*)$/i;
 
 function parseEnrollmentCommand(text) {
   if (CHECK_ENROLLMENTS_PATTERN.test(text)) {
     return { action: "list" };
+  }
+  const studentMatch = text.match(CHECK_STUDENT_PATTERN);
+  if (studentMatch) {
+    return { action: "find_student", query: studentMatch[2].replace(/^(?:email|contact|phone)\s*/i, "").trim() };
   }
   const approveMatch = text.match(APPROVE_PATTERN);
   if (approveMatch) {
@@ -1096,6 +1126,8 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
               let resultText;
               if (enrollmentCommand.action === "list") {
                 resultText = await handleListPendingCommand();
+              } else if (enrollmentCommand.action === "find_student") {
+                resultText = await handleFindStudentCommand(enrollmentCommand.query);
               } else if (enrollmentCommand.action === "enroll") {
                 resultText = await handleEnrollCommand(enrollmentCommand, adminPhoneNumber);
               } else {
@@ -1110,7 +1142,9 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
                   detail:
                     enrollmentCommand.action === "list"
                       ? "Checked pending enrollments"
-                      : `${enrollmentCommand.student} — ${enrollmentCommand.course || enrollmentCommand.detail || ""}`.trim(),
+                      : enrollmentCommand.action === "find_student"
+                        ? `Looked up: ${enrollmentCommand.query || "(no query)"}`
+                        : `${enrollmentCommand.student} — ${enrollmentCommand.course || enrollmentCommand.detail || ""}`.trim(),
                   type: "ok",
                   createdAt: Date.now(),
                 })

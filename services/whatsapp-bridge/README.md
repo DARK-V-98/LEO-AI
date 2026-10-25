@@ -122,6 +122,7 @@ dates, not the AI — so these are fast and don't cost an AI call):
   tasks". Checked periodically, not a precise cron — "once a day" means
   the first check at/after 8am Colombo time, not exact-to-the-minute.
 - **Admin-only LMS commands** — `"check enrollments"`,
+  `"check student <name/email/phone>"`,
   `"approve <student> [for <course>]"`,
   `"reject <student>[: <reason>]"`, `"enroll <student> in <course>"`, and
   `"remove <student> from <course>"` call real routes on the SmartLabs LMS
@@ -139,7 +140,12 @@ dates, not the AI — so these are fast and don't cost an AI call):
   to numbers that actually have them.
   - `"check enrollments"` lists what's actually pending — each line gives
     the student's name, email, course and batch, exactly what you'd
-    quote back in an `approve`/`reject`/`remove` command.
+    quote back in an `approve`/`reject`/`remove` command. Note: this only
+    includes `status == "pending"` (bank-transfer enrollments awaiting a
+    manual receipt check) — PayHere enrollments sit as `pending_payment`
+    instead and won't show up here, same as the LMS's own dashboard view.
+  - `"check student <name/email/phone>"` looks up a student directly —
+    asks for an identifier if you don't give one, rather than stalling.
   - `approve`/`reject`/`remove` all resolve the student+course against the
     LMS's *pending* enrollment requests, since that's the only lookup the
     LMS currently exposes by name — `remove` can only act on a still-pending
