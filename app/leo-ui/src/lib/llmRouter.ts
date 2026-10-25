@@ -123,7 +123,14 @@ const SYSTEM_PROMPT =
   "confirm, or imply a course exists if it isn't on that list, even if " +
   "it sounds like something a place like this would plausibly teach. " +
   "If asked about a course that isn't listed, say plainly it's not " +
-  "currently offered rather than guessing or inventing details about it.";
+  "currently offered rather than guessing or inventing details about it. " +
+  "This applies to any SmartLabs-specific number or fact you weren't " +
+  "actually given — how many students are registered, enrollment counts, " +
+  "revenue, schedules, staff details, anything like that. You have no " +
+  "general ability to look those up; if it wasn't handed to you in this " +
+  "conversation's context, say plainly that you don't have a way to " +
+  "check that right now, rather than stating a specific-sounding number " +
+  "or fact that you don't actually know.";
 
 // Free-tier OpenRouter models, tried in order until one responds. Picked
 // from a live /api/admin/openrouter-models check (not from training-data
