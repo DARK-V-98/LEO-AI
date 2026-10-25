@@ -136,6 +136,20 @@ function describeAmbiguousMatches(matches) {
     .join("\n");
 }
 
+// "check enrollments" — lists what's actually pending, formatted so each
+// line has what approve/reject/remove need to resolve it unambiguously.
+async function handleListPendingCommand() {
+  const pending = await lmsListPendingEnrollments();
+  if (pending.length === 0) {
+    return "No pending enrollments right now.";
+  }
+  const lines = pending
+    .slice(0, 20)
+    .map((e) => `• ${e.userName} (${e.userEmail}) — ${e.courseTitle} (${e.batchName})`);
+  const suffix = pending.length > 20 ? `\n…and ${pending.length - 20} more.` : "";
+  return `${pending.length} pending enrollment${pending.length === 1 ? "" : "s"}:\n${lines.join("\n")}${suffix}`;
+}
+
 // approve / reject / remove all key off the same pending-enrollment lookup
 // (see findMatchingPendingEnrollments) — remove only resolves a *pending*
 // request this way; removing an already-active student by name isn't
@@ -478,6 +492,7 @@ const BASE_HELP_LINES = [
 const ADMIN_HELP_LINES = [
   "",
   "Admin-only (your number has this — LMS actions):",
+  '• "check enrollments" — lists what\'s actually pending right now.',
   '• "approve <student> [for <course>]" / "reject <student>[: <reason>]" — decides a pending enrollment request.',
   '• "enroll <student> in <course>" — grants immediate course/batch access, skipping the pending step.',
   '• "remove <student> from <course>" — bans their pending request (doesn\'t touch an already-active student yet).',
@@ -615,8 +630,16 @@ const APPROVE_PATTERN = /^\s*approve\s+(.+?)(?:\s+for\s+(.+))?\s*$/i;
 const REJECT_PATTERN = /^\s*reject\s+(.+?)(?:\s*[:\-]\s*(.+))?\s*$/i;
 const ENROLL_PATTERN = /^\s*(?:enroll|grant)\s+(.+?)\s+(?:in|into|for|access to)\s+(.+?)\s*$/i;
 const REMOVE_PATTERN = /^\s*remove\s+(.+?)\s+from\s+(.+?)\s*$/i;
+// "check enrollments" / "list pending enrollments" / "show enrollments" —
+// lists what's actually waiting for a decision. Checked first since it
+// takes no student/course argument and the other patterns wouldn't match
+// this phrasing anyway.
+const CHECK_ENROLLMENTS_PATTERN = /^\s*(?:check|list|show)\s+(?:the\s+)?(?:pending\s+)?enrollments?\b/i;
 
 function parseEnrollmentCommand(text) {
+  if (CHECK_ENROLLMENTS_PATTERN.test(text)) {
+    return { action: "list" };
+  }
   const approveMatch = text.match(APPROVE_PATTERN);
   if (approveMatch) {
     return { action: "approve", student: approveMatch[1].trim(), course: approveMatch[2]?.trim() || null };
@@ -1071,7 +1094,9 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             await sendWorkingNotice(activeSock, remoteJid, "🔎 Checking the LMS…");
             try {
               let resultText;
-              if (enrollmentCommand.action === "enroll") {
+              if (enrollmentCommand.action === "list") {
+                resultText = await handleListPendingCommand();
+              } else if (enrollmentCommand.action === "enroll") {
                 resultText = await handleEnrollCommand(enrollmentCommand, adminPhoneNumber);
               } else {
                 resultText = await handlePendingEnrollmentCommand(enrollmentCommand, adminPhoneNumber);
@@ -1082,7 +1107,10 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
                 .collection("activity")
                 .add({
                   title: `LMS action via WhatsApp: ${enrollmentCommand.action}`,
-                  detail: `${enrollmentCommand.student} — ${enrollmentCommand.course || enrollmentCommand.detail || ""}`.trim(),
+                  detail:
+                    enrollmentCommand.action === "list"
+                      ? "Checked pending enrollments"
+                      : `${enrollmentCommand.student} — ${enrollmentCommand.course || enrollmentCommand.detail || ""}`.trim(),
                   type: "ok",
                   createdAt: Date.now(),
                 })

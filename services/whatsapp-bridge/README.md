@@ -121,7 +121,8 @@ dates, not the AI — so these are fast and don't cost an AI call):
   Stays quiet on a day with nothing new, rather than pinging "0 leads, 0
   tasks". Checked periodically, not a precise cron — "once a day" means
   the first check at/after 8am Colombo time, not exact-to-the-minute.
-- **Admin-only LMS commands** — `"approve <student> [for <course>]"`,
+- **Admin-only LMS commands** — `"check enrollments"`,
+  `"approve <student> [for <course>]"`,
   `"reject <student>[: <reason>]"`, `"enroll <student> in <course>"`, and
   `"remove <student> from <course>"` call real routes on the SmartLabs LMS
   (`esystemlk/lms-smartlabs`'s `/api/leo/*` endpoints — see the "LEO ↔
@@ -136,6 +137,9 @@ dates, not the AI — so these are fast and don't cost an AI call):
   so an admin's own chat being compromised can't be used to mint more
   admins. The help message ("help"/"commands") only lists admin commands
   to numbers that actually have them.
+  - `"check enrollments"` lists what's actually pending — each line gives
+    the student's name, email, course and batch, exactly what you'd
+    quote back in an `approve`/`reject`/`remove` command.
   - `approve`/`reject`/`remove` all resolve the student+course against the
     LMS's *pending* enrollment requests, since that's the only lookup the
     LMS currently exposes by name — `remove` can only act on a still-pending
