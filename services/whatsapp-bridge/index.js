@@ -130,6 +130,23 @@ const lmsGrant = (studentId, courseId, batchId, adminPhoneNumber) =>
   callLms("/api/leo/enrollments/grant", { method: "POST", body: { studentId, courseId, batchId, adminPhoneNumber } });
 const lmsRemove = (enrollmentId, adminPhoneNumber, hard) =>
   callLms("/api/leo/enrollments/remove", { method: "POST", body: { enrollmentId, adminPhoneNumber, hard } });
+// Full course roster (names/emails/contacts) and an atomic transfer (bans
+// the old enrollment, grants the new one in one Firestore batch) — added
+// to the LMS once the gaps documented in the "LEO ↔ SmartLabs LMS:
+// Remaining API Changes" doc were fixed on that side.
+const lmsCourseRoster = (courseId, opts = {}) => {
+  const params = new URLSearchParams();
+  if (opts.batchId) params.set("batchId", opts.batchId);
+  if (opts.status) params.set("status", opts.status);
+  if (opts.cursor) params.set("cursor", opts.cursor);
+  const qs = params.toString();
+  return callLms(`/api/leo/courses/${encodeURIComponent(courseId)}/students${qs ? `?${qs}` : ""}`);
+};
+const lmsTransfer = (studentId, fromCourseId, toCourseId, toBatchId, adminPhoneNumber) =>
+  callLms("/api/leo/enrollments/transfer", {
+    method: "POST",
+    body: { studentId, fromCourseId, toCourseId, toBatchId, adminPhoneNumber },
+  });
 
 // Real connectivity check, triggered by the dashboard's "Check LMS
 // connection" button (via lmsCheckRequests) — not just "is the env var
@@ -208,19 +225,33 @@ async function handleFindStudentCommand(query) {
   return `Found ${students.length} students matching "${query}":\n${lines.join("\n")}`;
 }
 
-// "list students in <course>" — honestly not possible with the current LMS
-// API: GET /api/leo/students only searches one student at a time by name/
-// email/phone, and GET /api/leo/courses only gives batch *counts*, not who
-// those students are. There's no course-roster lookup to wrap. Says so
-// plainly instead of silently failing or guessing at a list.
+// "list students in <course>" — resolves the course by name against the
+// cached catalog, then pulls the real roster (names/emails/contacts) from
+// the LMS's course-roster endpoint.
 async function handleCourseRosterCommand(courseQuery) {
-  return (
-    `I can't pull a full roster for "${courseQuery}" yet — the LMS doesn't ` +
-    `have an endpoint for that right now (it only supports looking up one ` +
-    `student at a time, or seeing a batch's enrolled count, not the list ` +
-    `of who's in it). This needs a new LMS-side endpoint to actually work — ` +
-    `worth adding if you want this regularly; ask your developer.`
-  );
+  const courses = await getLmsCoursesCached();
+  const q = courseQuery.trim().toLowerCase();
+  const course = courses.find((c) => c.title.toLowerCase().includes(q));
+  if (!course) {
+    return `Couldn't find a course matching "${courseQuery}" — ask me what courses we offer if you're not sure of the exact name.`;
+  }
+  const { students, count, nextCursor } = await lmsCourseRoster(course.id);
+  if (count === 0) {
+    return `No active students in "${course.title}" right now.`;
+  }
+  const lines = students
+    .slice(0, 40)
+    .map(
+      (s) =>
+        `• ${s.name || "(no name)"} — ${s.email || "no email"}${s.contact ? `, ${s.contact}` : ""} (${s.batchName})`
+    );
+  const suffix =
+    count > lines.length
+      ? `\n…and ${count - lines.length} more.`
+      : nextCursor
+        ? "\n…more beyond this page — ask again narrowed to a specific batch if you need the rest."
+        : "";
+  return `${count} student${count === 1 ? "" : "s"} in "${course.title}":\n${lines.join("\n")}${suffix}`;
 }
 
 // --- Guided enroll / transfer flows -------------------------------------
@@ -280,7 +311,7 @@ function renderConfirmation(flow) {
   const prep = flow.type === "transfer" ? "to" : "in";
   const note =
     flow.type === "transfer"
-      ? '\n\n(Note: this adds them to the new batch — the LMS doesn\'t yet let me look up and automatically close out their old one, so check that separately if needed.)'
+      ? "\n\n(Their current enrollment in this course will be closed out as part of the move.)"
       : "";
   return `${verb} ${flow.studentName} (${flow.studentEmail}) ${prep} "${flow.selectedCourse.title}" — ${flow.selectedBatch.name}?${note}\n\nReply YES to confirm or NO to cancel.`;
 }
@@ -428,12 +459,16 @@ async function handleActiveFlowMessage(activeSock, remoteJid, senderJid, askText
       clearFlow(senderJid);
       await sendWorkingNotice(activeSock, remoteJid, "🔎 Checking the LMS…");
       try {
-        const { enrollment } = await lmsGrant(
-          flow.studentId,
-          flow.selectedCourse.id,
-          flow.selectedBatch.id,
-          flow.adminPhoneNumber
-        );
+        const { enrollment } =
+          flow.type === "transfer"
+            ? await lmsTransfer(
+                flow.studentId,
+                flow.selectedCourse.id,
+                flow.selectedCourse.id,
+                flow.selectedBatch.id,
+                flow.adminPhoneNumber
+              )
+            : await lmsGrant(flow.studentId, flow.selectedCourse.id, flow.selectedBatch.id, flow.adminPhoneNumber);
         const verb = flow.type === "transfer" ? "Moved" : "Enrolled";
         const prep = flow.type === "transfer" ? "to" : "in";
         const text = `${verb}: ${enrollment?.userName || flow.studentName} is now ${prep} ${enrollment?.courseTitle || flow.selectedCourse.title} — ${enrollment?.batchName || flow.selectedBatch.name}.`;
@@ -826,8 +861,8 @@ const ADMIN_HELP_LINES = [
   '• "enroll <student> in <course>" — grants immediate course/batch access, skipping the pending step.',
   '• "remove <student> from <course>" — bans their pending request (doesn\'t touch an already-active student yet).',
   '• "enroll this student <email>" — guided flow: pick a course, pick a batch, confirm, done.',
-  '• "change/move/transfer <email>\'s batch" — guided flow to move them to a different course/batch (adds the new one; doesn\'t auto-remove the old enrollment yet).',
-  '• "list students in <course>" — tells you plainly this isn\'t possible yet (the LMS has no roster endpoint).',
+  '• "change/move/transfer <email>\'s batch" — guided flow to move them to a different batch, closing out the old enrollment as part of the same move.',
+  '• "list students in <course>" — full roster with names, emails, and contacts.',
 ];
 
 // Admin commands only show up in the help text for admins — a student
@@ -981,10 +1016,8 @@ const GUIDED_ENROLL_PATTERN = /^\s*enroll\s+(?:this\s+)?student\s*[:\-]?\s*(\S+@
 // student <email>" — the guided batch-change flow. Requires the word
 // "batch" to be present so it doesn't fire on unrelated sentences.
 const TRANSFER_PATTERN = /^\s*(?:change|move|transfer)\b(?=.*\bbatch\b).*?(\S+@\S+\.\S+)/i;
-// "list students in/of <course>" — a full roster request. The LMS doesn't
-// currently expose a course-roster endpoint (only per-student search and
-// per-batch counts), so this is handled honestly rather than guessed at —
-// see handleCourseRosterCommand.
+// "list students in/of <course>" — a full roster request, resolved via the
+// LMS's course-roster endpoint — see handleCourseRosterCommand.
 const COURSE_ROSTER_PATTERN =
   /^\s*(?:list|show|get)\s+(?:the\s+)?students?\s+(?:(?:enrolled|registered)\s+)?(?:in|of|for)\s+(.+?)\s*$/i;
 

@@ -156,10 +156,10 @@ dates, not the AI — so these are fast and don't cost an AI call):
   to numbers that actually have them.
   - `"check enrollments"` lists what's actually pending — each line gives
     the student's name, email, course and batch, exactly what you'd
-    quote back in an `approve`/`reject`/`remove` command. Note: this only
-    includes `status == "pending"` (bank-transfer enrollments awaiting a
-    manual receipt check) — PayHere enrollments sit as `pending_payment`
-    instead and won't show up here, same as the LMS's own dashboard view.
+    quote back in an `approve`/`reject`/`remove` command. Covers both
+    `status == "pending"` (bank-transfer enrollments awaiting a manual
+    receipt check) and `status == "pending_payment"` (PayHere enrollments
+    awaiting payment) — the LMS's query was widened to catch both.
   - `"check student <name/email/phone>"` looks up a student directly —
     asks for an identifier if you don't give one, rather than stalling.
   - `approve`/`reject`/`remove` all resolve the student+course against the
@@ -193,22 +193,18 @@ dates, not the AI — so these are fast and don't cost an AI call):
   - **Guided transfer**: `"change"`/`"move"`/`"transfer" <email>'s batch"`
     (the word "batch" is required) starts the same kind of guided flow,
     except the course menu is filtered to courses the student is already
-    enrolled in. **Known limitation**: the LMS has no endpoint to look up a
-    student's specific active enrollment ID for a course, so this only
-    grants the new course/batch — it doesn't (and currently can't) remove
-    the old enrollment automatically. LEO says this plainly in the
-    confirmation step so nobody assumes the old one was cleaned up.
+    enrolled in. Confirming calls the LMS's `/api/leo/enrollments/transfer`
+    route, which bans the old enrollment and grants the new batch in one
+    atomic Firestore batch — never leaves a student in both or neither.
   - A guided flow in progress takes over that admin's very next reply
     (whatever it is) until they finish, cancel, or 10 minutes pass — except
     a message that's recognized as a different real command (e.g. "check
     enrollments") still interrupts it rather than getting swallowed as a
     menu choice.
-  - **Course rosters aren't possible yet**: `"list students in <course>"`
-    (or "show"/"get", "enrolled in"/"registered in"/"of"/"for") gets a
-    plain explanation that this isn't supported — the LMS only supports
-    looking up one student at a time or seeing a batch's enrolled *count*,
-    not who's actually in it. Needs a new LMS-side endpoint to do for
-    real; told honestly rather than guessed at or silently failing.
+  - **Course rosters**: `"list students in <course>"` (or "show"/"get",
+    "enrolled in"/"registered in"/"of"/"for") returns the real roster —
+    name, email, and contact for everyone actively enrolled — via the
+    LMS's `/api/leo/courses/:courseId/students` route.
 
 `companyKnowledge` starts pre-seeded (on first boot, if empty) with:
 SmartLabs is an educational institute; Ms. Lahiruka is the Managing
