@@ -225,20 +225,102 @@ async function handleFindStudentCommand(query) {
   return `Found ${students.length} students matching "${query}":\n${lines.join("\n")}`;
 }
 
-// "list students in <course>" — resolves the course by name against the
-// cached catalog, then pulls the real roster (names/emails/contacts) from
-// the LMS's course-roster endpoint.
-async function handleCourseRosterCommand(courseQuery) {
+// Matches a catalog course against whatever an admin actually typed —
+// loose on purpose, since "the AI diploma course" or "AI diploma with
+// their emails" are both plausible and neither is a clean substring of
+// the real title "AI Diploma" (nor vice versa, in the first case).
+function resolveCourseByName(courses, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+
+  const exact = courses.find((c) => c.title.toLowerCase() === q);
+  if (exact) return exact;
+
+  const contains = courses.find((c) => {
+    const title = c.title.toLowerCase();
+    return q.includes(title) || title.includes(q);
+  });
+  if (contains) return contains;
+
+  // Last resort: every meaningful word in what was typed shows up
+  // somewhere in the title, so filler words ("the", "course") don't
+  // block a match that's otherwise obvious.
+  const stopwords = new Set(["the", "a", "an", "course", "courses", "program", "programme", "class"]);
+  const qWords = q.split(/\s+/).filter((w) => w && !stopwords.has(w));
+  if (qWords.length === 0) return null;
+  return courses.find((c) => qWords.every((w) => c.title.toLowerCase().includes(w))) || null;
+}
+
+// Strips an "each/all/by/per batch" clause the admin worked into the
+// course name itself ("each batch of AI diploma", "AI diploma by batch"),
+// leaving just the course — the clause is what sets `byBatch`, handled
+// separately in parseCourseRosterRequest.
+function stripBatchPhrase(s) {
+  return s
+    .replace(/^(?:by|per|for|in|on)?\s*(?:each|all)?\s*batche?s?\s*(?:of\s+)?/i, "")
+    .replace(/\s*(?:by|per|for|in|on)?\s*(?:each|all)?\s*batche?s?\s*$/i, "")
+    .trim();
+}
+
+// Strips a trailing "with (their) emails/contacts/numbers/names" clause —
+// admins often tack the fields they want onto the end of the course name
+// itself ("AI diploma with their emails and contact numbers"), which isn't
+// part of the course and would otherwise block the lookup.
+function stripTrailingDetailsRequest(s) {
+  let prev;
+  let curr = s;
+  do {
+    prev = curr;
+    curr = curr
+      .replace(/\s+(?:with|and)\s+(?:their|the)?\s*(?:emails?|contacts?|phone\s*numbers?|contact\s*numbers?|numbers?|names?)\s*$/i, "")
+      .trim();
+  } while (curr !== prev);
+  return curr;
+}
+
+// "list students in <course>" / "list students on each batch of <course>"
+// — resolves the course by name against the cached catalog, then pulls the
+// real roster (names/emails/contacts) from the LMS's course-roster
+// endpoint, optionally grouped per batch.
+async function handleCourseRosterCommand(courseQuery, byBatch) {
   const courses = await getLmsCoursesCached();
-  const q = courseQuery.trim().toLowerCase();
-  const course = courses.find((c) => c.title.toLowerCase().includes(q));
+  if (!courseQuery) {
+    const names = courses.slice(0, 8).map((c) => `"${c.title}"`).join(", ");
+    return `Which course? ${names ? `We currently offer: ${names}.` : "I don't have a course list to check against right now."}`;
+  }
+
+  const course = resolveCourseByName(courses, courseQuery);
   if (!course) {
     return `Couldn't find a course matching "${courseQuery}" — ask me what courses we offer if you're not sure of the exact name.`;
   }
+
   const { students, count, nextCursor } = await lmsCourseRoster(course.id);
   if (count === 0) {
     return `No active students in "${course.title}" right now.`;
   }
+
+  if (byBatch) {
+    const byBatchMap = new Map();
+    for (const s of students) {
+      const key = s.batchName || "(no batch)";
+      if (!byBatchMap.has(key)) byBatchMap.set(key, []);
+      byBatchMap.get(key).push(s);
+    }
+    const sections = [...byBatchMap.entries()].map(([batchName, group]) => {
+      const lines = group
+        .slice(0, 40)
+        .map((s) => `  • ${s.name || "(no name)"} — ${s.email || "no email"}${s.contact ? `, ${s.contact}` : ""}`);
+      return `${batchName} (${group.length}):\n${lines.join("\n")}`;
+    });
+    const suffix = nextCursor
+      ? "\n\n…more beyond this page — ask again narrowed to a specific batch if you need the rest."
+      : "";
+    return (
+      `"${course.title}" — ${count} student${count === 1 ? "" : "s"} across ${byBatchMap.size} ` +
+      `batch${byBatchMap.size === 1 ? "" : "es"}:\n\n${sections.join("\n\n")}${suffix}`
+    );
+  }
+
   const lines = students
     .slice(0, 40)
     .map(
@@ -862,7 +944,7 @@ const ADMIN_HELP_LINES = [
   '• "remove <student> from <course>" — bans their pending request (doesn\'t touch an already-active student yet).',
   '• "enroll this student <email>" — guided flow: pick a course, pick a batch, confirm, done.',
   '• "change/move/transfer <email>\'s batch" — guided flow to move them to a different batch, closing out the old enrollment as part of the same move.',
-  '• "list students in <course>" — full roster with names, emails, and contacts.',
+  '• "list students in <course>" — full roster with names, emails, and contacts; add "by batch"/"each batch" to break it down per batch instead of one flat list.',
 ];
 
 // Admin commands only show up in the help text for admins — a student
@@ -1016,18 +1098,32 @@ const GUIDED_ENROLL_PATTERN = /^\s*enroll\s+(?:this\s+)?student\s*[:\-]?\s*(\S+@
 // student <email>" — the guided batch-change flow. Requires the word
 // "batch" to be present so it doesn't fire on unrelated sentences.
 const TRANSFER_PATTERN = /^\s*(?:change|move|transfer)\b(?=.*\bbatch\b).*?(\S+@\S+\.\S+)/i;
-// "list students in/of <course>" — a full roster request, resolved via the
-// LMS's course-roster endpoint — see handleCourseRosterCommand.
-const COURSE_ROSTER_PATTERN =
-  /^\s*(?:list|show|get)\s+(?:the\s+)?students?\s+(?:(?:enrolled|registered)\s+)?(?:in|of|for)\s+(.+?)\s*$/i;
+// "list/show/get/give/send (me) (the) students (list) in/of/for/on
+// <course>" — a full roster request, resolved via the LMS's course-roster
+// endpoint (see handleCourseRosterCommand). Not anchored to the start and
+// not fussy about the exact verb, since admins ask for this many
+// different ways — but it does require the plural "students" (a singular
+// "student" is CHECK_STUDENT_PATTERN's territory, a single lookup).
+const COURSE_ROSTER_PATTERN = /\bstudents\b[\s\w]{0,25}?\b(?:in|of|for|on)\s+(.+?)\s*$/i;
+// Any mention of "batch"/"batches" in a roster request means "break this
+// down per batch" rather than one flat list.
+const BY_BATCH_HINT_PATTERN = /\bbatch(?:es)?\b/i;
+
+function parseCourseRosterRequest(text) {
+  const match = text.match(COURSE_ROSTER_PATTERN);
+  if (!match) return null;
+  const byBatch = BY_BATCH_HINT_PATTERN.test(text);
+  const course = stripTrailingDetailsRequest(stripBatchPhrase(match[1].trim()));
+  return { course: course || null, byBatch };
+}
 
 function parseEnrollmentCommand(text) {
   if (CHECK_ENROLLMENTS_PATTERN.test(text)) {
     return { action: "list" };
   }
-  const rosterMatch = text.match(COURSE_ROSTER_PATTERN);
+  const rosterMatch = parseCourseRosterRequest(text);
   if (rosterMatch) {
-    return { action: "course_roster", course: rosterMatch[1].trim() };
+    return { action: "course_roster", course: rosterMatch.course, byBatch: rosterMatch.byBatch };
   }
   const studentMatch = text.match(CHECK_STUDENT_PATTERN);
   if (studentMatch) {
@@ -1643,7 +1739,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
               } else if (enrollmentCommand.action === "find_student") {
                 resultText = await handleFindStudentCommand(enrollmentCommand.query);
               } else if (enrollmentCommand.action === "course_roster") {
-                resultText = await handleCourseRosterCommand(enrollmentCommand.course);
+                resultText = await handleCourseRosterCommand(enrollmentCommand.course, enrollmentCommand.byBatch);
               } else if (enrollmentCommand.action === "enroll") {
                 resultText = await handleEnrollCommand(enrollmentCommand, adminPhoneNumber);
               } else if (enrollmentCommand.action === "start_enroll") {
@@ -1672,7 +1768,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
                       : enrollmentCommand.action === "find_student"
                         ? `Looked up: ${enrollmentCommand.query || "(no query)"}`
                         : enrollmentCommand.action === "course_roster"
-                          ? `Roster: ${enrollmentCommand.course}`
+                          ? `Roster: ${enrollmentCommand.course || "(no course given)"}${enrollmentCommand.byBatch ? " (by batch)" : ""}`
                           : flowStarted
                             ? `${enrollmentCommand.action}: ${enrollmentCommand.email}`
                             : `${enrollmentCommand.student} — ${enrollmentCommand.course || enrollmentCommand.detail || ""}`.trim(),
