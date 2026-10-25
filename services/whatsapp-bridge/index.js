@@ -884,7 +884,15 @@ async function getCompanyContext(senderJid, isGroup) {
         `\nThis is a group chat with several different people. The message you're ` +
           `replying to right now was sent by ${person ? `${person.name}${person.role ? `, ${person.role}` : ""}` : "someone who hasn't introduced themselves yet"} ` +
           `— address your reply to them specifically, not the group as a whole, and don't assume ` +
-          `anyone else in the group is the same person.`
+          `anyone else in the group is the same person. In the recent history below, each line from ` +
+          `a person is labeled with their name (or phone number if they haven't introduced ` +
+          `themselves), and most of your own earlier replies are labeled "LEO (to <name>): ..." — that ` +
+          `label tells you exactly who that specific reply was for (an unlabeled reply was addressed ` +
+          `to whoever's labeled message directly precedes it). Never say "as I mentioned" or "like I ` +
+          `said" to someone unless a reply addressed to THEM is what you're referring to; a reply ` +
+          `addressed to a different person was never said to the person you're replying to now. That ` +
+          `"Name:" / "LEO (to Name):" labeling is only there so you can tell who's who in the history ` +
+          `— never include it yourself in what you actually say back.`
       );
     } else if (person) {
       lines.push(
@@ -1073,7 +1081,14 @@ async function askLeo(jid, senderJid, isGroup, attachment) {
     });
     const data = await res.json();
     const reply = data?.reply || "Sorry, I didn't catch that — could you say it again?";
-    remember(jid, "assistant", reply);
+    // In a group, label which person this specific reply was actually
+    // addressed to — otherwise a later reader of this same shared history
+    // (including the model itself, on the next turn) has no way to tell
+    // an earlier reply was for someone else, and can end up saying "as I
+    // mentioned earlier" to the wrong person. The text actually sent to
+    // WhatsApp (`reply`, returned below) stays unlabeled either way.
+    const storedReply = isGroup ? `LEO (to ${await personLabel(senderJid)}): ${reply}` : reply;
+    remember(jid, "assistant", storedReply);
     if (Array.isArray(data?.actions) && data.actions.length > 0) {
       await executeActions(data.actions, senderJid);
     }

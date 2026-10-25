@@ -140,6 +140,15 @@ dates, not the AI — so these are fast and don't cost an AI call):
     not just per chat, so that can't happen anymore. A lead or task
     logged from a group conversation is attributed to whoever actually
     sent that message, not the group itself.
+  - LEO's own replies in a group are labeled too — `"LEO (to Vishwa):
+    ..."` — not just the people talking to him, since an earlier reply
+    sitting in the shared history with no indication of who it was for
+    let LEO say things like "as I mentioned earlier" to the wrong
+    person (confusing a reply meant for someone else as having been
+    said to whoever's talking now). The context sent for every reply
+    explains what that labeling means and tells LEO explicitly never to
+    attribute a reply to someone it wasn't actually addressed to — and
+    never to echo the label itself back into what he actually says.
 - **"remember that \<fact\>"** — e.g. `remember that our office closes at
   5pm on Fridays` — on top of the above, this *deliberately* promotes
   something to permanent company knowledge (`companyKnowledge`),
