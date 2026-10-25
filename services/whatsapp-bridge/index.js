@@ -43,11 +43,35 @@ const KNOWLEDGE = db.collection("companyKnowledge");
 const PEOPLE = db.collection("people");
 const LEADS = db.collection("leads");
 const TASKS = db.collection("tasks");
+const WHATSAPP_ADMINS = db.collection("whatsappAdmins");
+const ENROLLMENTS = db.collection("enrollments");
 
 // Optional: a WhatsApp JID (a number like "94771234567@s.whatsapp.net") to
 // send a once-a-day summary of new leads/tasks to. Unset by default — the
 // digest is simply skipped until someone opts in by setting this.
 const DAILY_DIGEST_JID = process.env.DAILY_DIGEST_JID || null;
+
+// --- WhatsApp admin permissions -----------------------------------------
+// A small, privileged set of numbers (managed only from the dashboard —
+// see firestore.rules) allowed to run admin-only commands on WhatsApp,
+// like approving a student's enrollment. Everything else LEO does on
+// WhatsApp stays open to anyone who can message him; this is specifically
+// for the subset of actions that shouldn't be, now that students are
+// going to have access too. Kept in memory via a live listener rather than
+// an expiring cache — the list is small and changes rarely, so there's no
+// real cost to always being current.
+const adminJids = new Set();
+WHATSAPP_ADMINS.onSnapshot(
+  (snap) => {
+    adminJids.clear();
+    snap.docs.forEach((d) => adminJids.add(d.id));
+  },
+  (err) => console.error("Failed to watch whatsappAdmins:", err)
+);
+
+function isWhatsAppAdmin(jid) {
+  return adminJids.has(jid);
+}
 
 const AUTH_DIR = process.env.AUTH_DIR || "./auth_info";
 const logger = pino({ level: process.env.LOG_LEVEL || "warn" });
@@ -244,7 +268,7 @@ async function maybeLearnIntroduction(jid, text) {
 const HELP_PATTERN =
   /^(?:help|commands)[.!?]?$|\bwhat (?:can you do|are your commands|commands do you have)\b|\blist (?:your )?commands\b/i;
 
-const HELP_TEXT = [
+const BASE_HELP_LINES = [
   "Here's what I can do here on WhatsApp:",
   "",
   "• Just talk to me normally — ask questions, request a task, etc. Mention a new lead or something to track and I'll log it automatically.",
@@ -255,9 +279,23 @@ const HELP_TEXT = [
   '• "remember that <fact>" — teaches me something to keep in mind going forward.',
   '• "what do you remember about me" / "forget about me" — check or clear what I know about you.',
   "• Send a voice note, photo, or document (PDF) and I'll read/listen and respond — works as a reply to earlier media too. Send a voice note and I'll reply with one too; say \"reply with voice\" anytime to get a voice note back.",
+];
+
+const ADMIN_HELP_LINES = [
   "",
-  "In the company group, say “Leo” so I know you're talking to me.",
-].join("\n");
+  "Admin-only (your number has this):",
+  '• "approve <student> [for <course>]" / "reject <student>[: <reason>]" — records an enrollment decision.',
+];
+
+// Admin commands only show up in the help text for admins — a student
+// seeing a list of things they can't actually use would just be
+// confusing (or an invitation to try anyway).
+function helpTextFor(jid) {
+  const lines = [...BASE_HELP_LINES];
+  if (isWhatsAppAdmin(jid)) lines.push(...ADMIN_HELP_LINES);
+  lines.push("", "In the company group, say “Leo” so I know you're talking to me.");
+  return lines.join("\n");
+}
 
 // Executes whatever structured actions Gemini's tool-calling decided to
 // take (log_lead, create_task) — writing to the same Firestore collections
@@ -372,6 +410,28 @@ function parsePoll(text) {
   if (!question || options.length < 2) return null;
   return { question, options };
 }
+
+// --- Admin-only: student enrollment decisions -------------------------
+// "approve <student>[ for <course>]" / "reject <student>[: <reason>]" —
+// the first concrete admin-only LMS-style action. Gated on isWhatsAppAdmin
+// at dispatch time, not just by who happens to know the phrasing.
+const APPROVE_PATTERN = /^\s*approve\s+(.+?)(?:\s+for\s+(.+))?\s*$/i;
+const REJECT_PATTERN = /^\s*reject\s+(.+?)(?:\s*[:\-]\s*(.+))?\s*$/i;
+
+function parseEnrollmentDecision(text) {
+  const approveMatch = text.match(APPROVE_PATTERN);
+  if (approveMatch) {
+    return { decision: "approved", student: approveMatch[1].trim(), detail: approveMatch[2]?.trim() || null };
+  }
+  const rejectMatch = text.match(REJECT_PATTERN);
+  if (rejectMatch) {
+    return { decision: "rejected", student: rejectMatch[1].trim(), detail: rejectMatch[2]?.trim() || null };
+  }
+  return null;
+}
+
+const NOT_ADMIN_TEXT =
+  "You don't have admin access for that — ask the developer to grant it to your number from the dashboard.";
 
 // "poster: <description>" / "poster <description>" / "make a poster of..."
 const POSTER_PATTERN = /\b(?:posters?|flyers?)\b\s*(?:of|for|about)?\s*[:\-]?\s*(.+)/i;
@@ -747,15 +807,27 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
         const rememberMatch = askText.match(REMEMBER_PATTERN);
         const whatRemember = !rememberMatch && WHAT_REMEMBER_PATTERN.test(askText);
         const forgetMe = !rememberMatch && !whatRemember && FORGET_ME_PATTERN.test(askText);
-        const pollMatch = !rememberMatch && !whatRemember && !forgetMe ? parsePoll(askText) : null;
-        const posterMatch = !rememberMatch && !whatRemember && !forgetMe && !pollMatch ? askText.match(POSTER_PATTERN) : null;
-        const reminder = !rememberMatch && !whatRemember && !forgetMe && !pollMatch ? parseReminder(askText) : null;
+        const enrollmentDecision =
+          !rememberMatch && !whatRemember && !forgetMe ? parseEnrollmentDecision(askText) : null;
+        const pollMatch =
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentDecision ? parsePoll(askText) : null;
+        const posterMatch =
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentDecision && !pollMatch
+            ? askText.match(POSTER_PATTERN)
+            : null;
+        const reminder =
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentDecision && !pollMatch
+            ? parseReminder(askText)
+            : null;
         const groupSend =
-          !rememberMatch && !whatRemember && !forgetMe && !pollMatch && !reminder ? parseGroupSend(askText) : null;
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentDecision && !pollMatch && !reminder
+            ? parseGroupSend(askText)
+            : null;
 
         if (HELP_PATTERN.test(askText)) {
-          await activeSock.sendMessage(remoteJid, { text: HELP_TEXT });
-          remember(remoteJid, "assistant", HELP_TEXT);
+          const helpText = helpTextFor(senderJid);
+          await activeSock.sendMessage(remoteJid, { text: helpText });
+          remember(remoteJid, "assistant", helpText);
         } else if (whatRemember) {
           const text = await describeWhatIsRemembered(senderJid);
           await activeSock.sendMessage(remoteJid, { text });
@@ -781,6 +853,39 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
               createdAt: Date.now(),
             })
             .catch(() => {});
+        } else if (enrollmentDecision) {
+          if (!isWhatsAppAdmin(senderJid)) {
+            await activeSock.sendMessage(remoteJid, { text: NOT_ADMIN_TEXT });
+            remember(remoteJid, "assistant", NOT_ADMIN_TEXT);
+          } else {
+            try {
+              await ENROLLMENTS.add({
+                student: enrollmentDecision.student,
+                status: enrollmentDecision.decision,
+                detail: enrollmentDecision.detail,
+                decidedBy: senderJid,
+                decidedAt: Date.now(),
+                createdAt: Date.now(),
+              });
+              const confirmText = `${enrollmentDecision.decision === "approved" ? "Approved" : "Rejected"}: ${enrollmentDecision.student}${enrollmentDecision.detail ? ` (${enrollmentDecision.detail})` : ""}.`;
+              await activeSock.sendMessage(remoteJid, { text: confirmText });
+              remember(remoteJid, "assistant", confirmText);
+              await db
+                .collection("activity")
+                .add({
+                  title: `Student ${enrollmentDecision.decision} via WhatsApp`,
+                  detail: enrollmentDecision.student,
+                  type: "ok",
+                  createdAt: Date.now(),
+                })
+                .catch(() => {});
+            } catch (err) {
+              console.error("Failed to record enrollment decision:", err);
+              const errText = "Something went wrong recording that — please try again.";
+              await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
+              remember(remoteJid, "assistant", errText);
+            }
+          }
         } else if (pollMatch) {
           try {
             await activeSock.sendMessage(remoteJid, {

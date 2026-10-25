@@ -121,6 +121,19 @@ dates, not the AI — so these are fast and don't cost an AI call):
   Stays quiet on a day with nothing new, rather than pinging "0 leads, 0
   tasks". Checked periodically, not a precise cron — "once a day" means
   the first check at/after 8am Colombo time, not exact-to-the-minute.
+- **Admin-only commands** — `"approve <student> [for <course>]"` /
+  `"reject <student>[: <reason>]"` record an enrollment decision to
+  Firestore's `enrollments` collection, but only for numbers the developer
+  has explicitly granted admin access to (dashboard's Admin tab →
+  "WhatsApp admins" card). This matters once students have access to LEO
+  on WhatsApp too — most numbers should only ever be able to chat, not
+  make LMS decisions. A non-admin trying an admin command gets told
+  plainly that they don't have access, rather than it silently failing or
+  (worse) silently working. Admin access can only be granted/revoked from
+  the dashboard, never from WhatsApp itself, so an admin's own chat being
+  compromised can't be used to mint more admins. The help message
+  ("help"/"commands") only lists admin commands to numbers that actually
+  have them.
 
 `companyKnowledge` starts pre-seeded (on first boot, if empty) with:
 SmartLabs is an educational institute; Ms. Lahiruka is the Managing

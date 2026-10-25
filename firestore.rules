@@ -94,5 +94,23 @@ service cloud.firestore {
         allow write: if false;
       }
     }
+
+    // WhatsApp admins — numbers granted admin-level actions on WhatsApp
+    // (LMS approvals, etc.), once students also have access to LEO there
+    // and most WhatsApp users should NOT have that power. Only the
+    // developer role may grant/revoke it, and only from the dashboard —
+    // deliberately never grantable from WhatsApp itself, so a compromised
+    // or careless admin chat can't escalate further admins on its own.
+    match /whatsappAdmins/{jid} {
+      allow read: if isDeveloper();
+      allow create, delete: if isDeveloper();
+      allow update: if false;
+    }
+
+    // Student enrollment decisions made via WhatsApp admin commands.
+    match /enrollments/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
   }
 }
