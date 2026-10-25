@@ -180,6 +180,18 @@ one being treated as a separate, disconnected message. Context sent to
 the AI covers the last 20 messages in that chat (not just the current
 one), so follow-up questions and multi-part requests hold together.
 
+**LEO can send more than one message when he's working**, same as a
+person continuing a conversation rather than making you wait for one
+big final block:
+- A reply with a blank line between two distinct thoughts (the system
+  prompt tells the model this) gets sent as separate WhatsApp messages,
+  a short beat apart, instead of one wall of text — capped at 4 so it
+  never floods a chat.
+- Before something that genuinely takes a few seconds — generating a
+  poster, synthesizing a voice reply, or an LMS admin command that makes
+  one or more real network calls — he sends a quick "working on it"
+  message first, so the chat doesn't just go silent while that happens.
+
 **Viewing chats on the dashboard**: every DM and group chat is visible
 on the website's Admin tab (`whatsappChats` in Firestore) — restricted
 to the developer role only (see `firestore.rules`), since this is real

@@ -112,7 +112,12 @@ const SYSTEM_PROMPT =
   "mis-transcribed voice message, or a name/number you're guessing at — " +
   "say so and ask a quick clarifying question instead of guessing " +
   "silently and risking a wrong action (especially before logging a " +
-  "lead or creating a task).";
+  "lead or creating a task). On WhatsApp, a reply with a blank line " +
+  "between two distinct thoughts gets sent as separate messages, the " +
+  "way a person continuing a conversation sends a couple of messages " +
+  "in a row rather than one big block — use that naturally for a " +
+  "multi-part answer (e.g. a quick acknowledgement, then the actual " +
+  "result), but don't force a split where one short reply is enough.";
 
 // Free-tier OpenRouter models, tried in order until one responds. Picked
 // from a live /api/admin/openrouter-models check (not from training-data

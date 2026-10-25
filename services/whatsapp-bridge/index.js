@@ -246,6 +246,45 @@ if (!WEB_BASE_URL) {
 // otherwise he'd answer every single message in the company group.
 const MENTION_PATTERN = /\bleo\b/i;
 
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Sends a quick "working on it" message before a genuinely slow operation
+ * (image generation, a network round-trip to another service, voice
+ * synthesis) so the chat doesn't just go silent for several seconds —
+ * same reason a person says "hang on, checking" instead of leaving you on
+ * read. Never awaited by the caller's own timing — fire-and-forget other
+ * than the WhatsApp send itself. */
+async function sendWorkingNotice(activeSock, jid, text) {
+  try {
+    await activeSock.sendMessage(jid, { text });
+    await activeSock.sendPresenceUpdate("composing", jid).catch(() => {});
+  } catch (err) {
+    console.error("Failed to send working notice:", err);
+  }
+}
+
+/** Sends a reply as more than one WhatsApp message when it naturally reads
+ * as separate thoughts (blank-line-separated paragraphs) — the way a
+ * person continuing a conversation sends a couple of messages in a row
+ * instead of one big block of text. Capped at 4 messages so a long reply
+ * doesn't turn into a flood, and falls back to a single message outside
+ * that range. */
+async function sendAsMessages(activeSock, jid, text) {
+  const parts = text
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const chunks = parts.length > 1 && parts.length <= 4 ? parts : [text];
+
+  for (let i = 0; i < chunks.length; i++) {
+    if (i > 0) {
+      await activeSock.sendPresenceUpdate("composing", jid).catch(() => {});
+      await delay(500 + Math.random() * 500);
+    }
+    await activeSock.sendMessage(jid, { text: chunks[i] });
+  }
+}
+
 let sock = null;
 let starting = false;
 // idle | connecting | open — guards against ever having two live sockets
@@ -1026,6 +1065,10 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             remember(remoteJid, "assistant", NOT_ADMIN_TEXT);
           } else {
             const adminPhoneNumber = senderJid.split("@")[0];
+            // One or more round-trips to the LMS — worth a quick heads-up
+            // rather than going quiet, especially for "enroll" which can
+            // make several calls (find student, list courses, grant).
+            await sendWorkingNotice(activeSock, remoteJid, "🔎 Checking the LMS…");
             try {
               let resultText;
               if (enrollmentCommand.action === "enroll") {
@@ -1077,6 +1120,13 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           const prompt = posterMatch[1].trim();
           try {
             const referenceImage = attachment?.kind === "image" ? attachment : null;
+            // Image generation genuinely takes several seconds — say so
+            // up front instead of leaving the chat silent that whole time.
+            await sendWorkingNotice(
+              activeSock,
+              remoteJid,
+              referenceImage ? "🎨 Working on your poster using that reference image…" : "🎨 Working on your poster…"
+            );
             const { image, mimeType } = await generatePoster(prompt, referenceImage);
             const caption = referenceImage
               ? `Here's your poster (using your reference image): "${prompt}"`
@@ -1188,6 +1238,9 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           const wantsVoice = attachment?.kind === "audio" || VOICE_REQUEST_PATTERN.test(askText);
           let sentVoice = false;
           if (wantsVoice) {
+            // TTS + ffmpeg conversion take a few seconds — say so rather
+            // than leaving the chat silent while that happens.
+            await sendWorkingNotice(activeSock, remoteJid, "🎤 Recording a voice reply…");
             const ogg = await synthesizeVoiceReply(reply).catch((err) => {
               console.error("Voice reply failed:", err);
               return null;
@@ -1198,7 +1251,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             }
           }
           if (!sentVoice) {
-            await activeSock.sendMessage(remoteJid, { text: reply });
+            await sendAsMessages(activeSock, remoteJid, reply);
           }
 
           await db
