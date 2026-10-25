@@ -164,6 +164,35 @@ dates, not the AI — so these are fast and don't cost an AI call):
     /api/leo/courses`) and writes the result to `lms/status`, and the
     dashboard shows that live. Confirms the key and URL actually work, not
     just that they're set.
+  - **Guided enroll**: `"enroll this student <email>"` starts a menu-driven
+    flow instead of requiring the course/batch up front — LEO looks the
+    student up, sends a numbered list of real courses, then (if more than
+    one open batch exists) a numbered list of batches for the chosen
+    course, then a yes/no confirmation before actually granting access.
+    Reply with either a number or a few letters of the name; "cancel" at
+    any step backs out. Numbered text menus were used deliberately instead
+    of WhatsApp's native interactive list/button messages — those aren't
+    reliably supported on unofficial Baileys-based accounts and can fail
+    silently.
+  - **Guided transfer**: `"change"`/`"move"`/`"transfer" <email>'s batch"`
+    (the word "batch" is required) starts the same kind of guided flow,
+    except the course menu is filtered to courses the student is already
+    enrolled in. **Known limitation**: the LMS has no endpoint to look up a
+    student's specific active enrollment ID for a course, so this only
+    grants the new course/batch — it doesn't (and currently can't) remove
+    the old enrollment automatically. LEO says this plainly in the
+    confirmation step so nobody assumes the old one was cleaned up.
+  - A guided flow in progress takes over that admin's very next reply
+    (whatever it is) until they finish, cancel, or 10 minutes pass — except
+    a message that's recognized as a different real command (e.g. "check
+    enrollments") still interrupts it rather than getting swallowed as a
+    menu choice.
+  - **Course rosters aren't possible yet**: `"list students in <course>"`
+    (or "show"/"get", "enrolled in"/"registered in"/"of"/"for") gets a
+    plain explanation that this isn't supported — the LMS only supports
+    looking up one student at a time or seeing a batch's enrolled *count*,
+    not who's actually in it. Needs a new LMS-side endpoint to do for
+    real; told honestly rather than guessed at or silently failing.
 
 `companyKnowledge` starts pre-seeded (on first boot, if empty) with:
 SmartLabs is an educational institute; Ms. Lahiruka is the Managing

@@ -207,6 +207,269 @@ async function handleFindStudentCommand(query) {
   return `Found ${students.length} students matching "${query}":\n${lines.join("\n")}`;
 }
 
+// "list students in <course>" — honestly not possible with the current LMS
+// API: GET /api/leo/students only searches one student at a time by name/
+// email/phone, and GET /api/leo/courses only gives batch *counts*, not who
+// those students are. There's no course-roster lookup to wrap. Says so
+// plainly instead of silently failing or guessing at a list.
+async function handleCourseRosterCommand(courseQuery) {
+  return (
+    `I can't pull a full roster for "${courseQuery}" yet — the LMS doesn't ` +
+    `have an endpoint for that right now (it only supports looking up one ` +
+    `student at a time, or seeing a batch's enrolled count, not the list ` +
+    `of who's in it). This needs a new LMS-side endpoint to actually work — ` +
+    `worth adding if you want this regularly; ask your developer.`
+  );
+}
+
+// --- Guided enroll / transfer flows -------------------------------------
+// A multi-step, menu-driven version of "enroll"/"change batch" — pick a
+// course, then a batch, then confirm — instead of needing the exact
+// course/batch name typed in one line. State lives per-admin in memory
+// (not Firestore: short-lived, fine to lose on a redeploy) with a timeout
+// so an abandoned flow can't linger forever.
+const ENROLL_FLOW_TTL_MS = 10 * 60 * 1000;
+const enrollFlows = new Map(); // senderJid -> flow state
+
+function clearFlow(jid) {
+  enrollFlows.delete(jid);
+}
+
+function getActiveFlow(jid) {
+  const flow = enrollFlows.get(jid);
+  if (!flow) return null;
+  if (Date.now() - flow.updatedAt > ENROLL_FLOW_TTL_MS) {
+    enrollFlows.delete(jid);
+    return null;
+  }
+  return flow;
+}
+
+function setFlow(jid, flow) {
+  flow.updatedAt = Date.now();
+  enrollFlows.set(jid, flow);
+}
+
+// Accepts a number ("2") against the shown menu, or a typed name as a
+// case-insensitive partial match — whichever the admin actually sends.
+function resolveMenuChoice(text, items, labelFn) {
+  const trimmed = text.trim();
+  const n = parseInt(trimmed, 10);
+  if (!Number.isNaN(n) && n >= 1 && n <= items.length && /^\d+$/.test(trimmed)) {
+    return items[n - 1];
+  }
+  const q = trimmed.toLowerCase();
+  return items.find((it) => labelFn(it).toLowerCase().includes(q)) || null;
+}
+
+function renderCourseMenu(courses) {
+  const lines = courses.map((c, i) => `${i + 1}. ${c.title}${c.category ? ` (${c.category})` : ""}`);
+  return `Which course?\n${lines.join("\n")}\n\nReply with a number, or "cancel".`;
+}
+
+function renderBatchMenu(course, batches) {
+  const lines = batches.map(
+    (b, i) => `${i + 1}. ${b.name} (${b.status}${b.maxStudents ? `, ${b.enrolledCount}/${b.maxStudents}` : ""})`
+  );
+  return `"${course.title}" — which batch?\n${lines.join("\n")}\n\nReply with a number, or "cancel".`;
+}
+
+function renderConfirmation(flow) {
+  const verb = flow.type === "transfer" ? "Move" : "Enroll";
+  const prep = flow.type === "transfer" ? "to" : "in";
+  const note =
+    flow.type === "transfer"
+      ? '\n\n(Note: this adds them to the new batch — the LMS doesn\'t yet let me look up and automatically close out their old one, so check that separately if needed.)'
+      : "";
+  return `${verb} ${flow.studentName} (${flow.studentEmail}) ${prep} "${flow.selectedCourse.title}" — ${flow.selectedBatch.name}?${note}\n\nReply YES to confirm or NO to cancel.`;
+}
+
+const CANCEL_WORDS = /^(cancel|stop|nevermind|never mind)$/i;
+const YES_WORDS = /^(yes|y|confirm|ok|okay|sure)$/i;
+const NO_WORDS = /^(no|n)$/i;
+
+async function advanceToConfirmationOrBatchMenu(activeSock, remoteJid, senderJid, flow, course) {
+  const openBatches = (course.batches || []).filter((b) => b.status === "open" || b.status === "ongoing");
+  if (openBatches.length === 0) {
+    clearFlow(senderJid);
+    const text = `"${course.title}" has no open batch right now. Cancelled.`;
+    await activeSock.sendMessage(remoteJid, { text });
+    remember(remoteJid, "assistant", text);
+    return;
+  }
+  flow.selectedCourse = course;
+  if (openBatches.length === 1) {
+    flow.selectedBatch = openBatches[0];
+    flow.step = "awaiting_confirmation";
+    setFlow(senderJid, flow);
+    const text = renderConfirmation(flow);
+    await activeSock.sendMessage(remoteJid, { text });
+    remember(remoteJid, "assistant", text);
+    return;
+  }
+  flow.batches = openBatches;
+  flow.step = "awaiting_batch";
+  setFlow(senderJid, flow);
+  const text = renderBatchMenu(course, openBatches);
+  await activeSock.sendMessage(remoteJid, { text });
+  remember(remoteJid, "assistant", text);
+}
+
+async function startEnrollFlow(activeSock, remoteJid, senderJid, email, adminPhoneNumber) {
+  const students = await lmsFindStudents(email);
+  if (students.length === 0) return `Couldn't find a student with email "${email}".`;
+  if (students.length > 1) {
+    return `Found ${students.length} matches for "${email}" — that shouldn't happen for an exact email. Try "check student ${email}" first.`;
+  }
+  const student = students[0];
+  const courses = await getLmsCoursesCached();
+  if (courses.length === 0) return "No courses are published right now.";
+
+  const flow = {
+    type: "enroll",
+    step: "awaiting_course",
+    studentId: student.id,
+    studentEmail: student.email,
+    studentName: student.name,
+    courses,
+    adminPhoneNumber,
+  };
+  setFlow(senderJid, flow);
+  return renderCourseMenu(courses);
+}
+
+async function startTransferFlow(activeSock, remoteJid, senderJid, email, adminPhoneNumber) {
+  const students = await lmsFindStudents(email);
+  if (students.length === 0) return `Couldn't find a student with email "${email}".`;
+  if (students.length > 1) {
+    return `Found ${students.length} matches for "${email}" — that shouldn't happen for an exact email. Try "check student ${email}" first.`;
+  }
+  const student = students[0];
+  const allCourses = await getLmsCoursesCached();
+  const enrolledIds = new Set(student.enrolledCourses || []);
+  const courses = allCourses.filter((c) => enrolledIds.has(c.id));
+  if (courses.length === 0) {
+    return `${student.name} isn't enrolled in any course yet — use "enroll this student ${email}" instead.`;
+  }
+
+  const flow = {
+    type: "transfer",
+    step: "awaiting_course",
+    studentId: student.id,
+    studentEmail: student.email,
+    studentName: student.name,
+    courses,
+    adminPhoneNumber,
+  };
+
+  if (courses.length === 1) {
+    setFlow(senderJid, flow);
+    await advanceToConfirmationOrBatchMenu(activeSock, remoteJid, senderJid, flow, courses[0]);
+    return null; // already sent its own message
+  }
+
+  setFlow(senderJid, flow);
+  return renderCourseMenu(courses);
+}
+
+/** Intercepts a message from an admin who has an active guided flow —
+ * returns true if it handled the message (so normal command dispatch is
+ * skipped), false otherwise. A message that matches a *different* real
+ * command abandons the stale flow instead of getting stuck waiting for a
+ * menu reply that will never come. */
+async function handleActiveFlowMessage(activeSock, remoteJid, senderJid, askText) {
+  const flow = getActiveFlow(senderJid);
+  if (!flow) return false;
+
+  if (parseEnrollmentCommand(askText)) {
+    clearFlow(senderJid);
+    return false;
+  }
+
+  const trimmed = askText.trim();
+  if (CANCEL_WORDS.test(trimmed)) {
+    clearFlow(senderJid);
+    const text = "Cancelled.";
+    await activeSock.sendMessage(remoteJid, { text });
+    remember(remoteJid, "assistant", text);
+    return true;
+  }
+
+  if (flow.step === "awaiting_course") {
+    const course = resolveMenuChoice(trimmed, flow.courses, (c) => c.title);
+    if (!course) {
+      const text = `Didn't catch that — reply with a number from the list, or "cancel".`;
+      await activeSock.sendMessage(remoteJid, { text });
+      return true;
+    }
+    await advanceToConfirmationOrBatchMenu(activeSock, remoteJid, senderJid, flow, course);
+    return true;
+  }
+
+  if (flow.step === "awaiting_batch") {
+    const batch = resolveMenuChoice(trimmed, flow.batches, (b) => b.name);
+    if (!batch) {
+      const text = `Didn't catch that — reply with a number from the list, or "cancel".`;
+      await activeSock.sendMessage(remoteJid, { text });
+      return true;
+    }
+    flow.selectedBatch = batch;
+    flow.step = "awaiting_confirmation";
+    setFlow(senderJid, flow);
+    const text = renderConfirmation(flow);
+    await activeSock.sendMessage(remoteJid, { text });
+    remember(remoteJid, "assistant", text);
+    return true;
+  }
+
+  if (flow.step === "awaiting_confirmation") {
+    if (YES_WORDS.test(trimmed)) {
+      clearFlow(senderJid);
+      await sendWorkingNotice(activeSock, remoteJid, "🔎 Checking the LMS…");
+      try {
+        const { enrollment } = await lmsGrant(
+          flow.studentId,
+          flow.selectedCourse.id,
+          flow.selectedBatch.id,
+          flow.adminPhoneNumber
+        );
+        const verb = flow.type === "transfer" ? "Moved" : "Enrolled";
+        const prep = flow.type === "transfer" ? "to" : "in";
+        const text = `${verb}: ${enrollment?.userName || flow.studentName} is now ${prep} ${enrollment?.courseTitle || flow.selectedCourse.title} — ${enrollment?.batchName || flow.selectedBatch.name}.`;
+        await activeSock.sendMessage(remoteJid, { text });
+        remember(remoteJid, "assistant", text);
+        await db
+          .collection("activity")
+          .add({
+            title: `LMS ${flow.type === "transfer" ? "batch transfer" : "enrollment"} via WhatsApp`,
+            detail: `${flow.studentEmail} → ${flow.selectedCourse.title} (${flow.selectedBatch.name})`,
+            type: "ok",
+            createdAt: Date.now(),
+          })
+          .catch(() => {});
+      } catch (err) {
+        console.error("Guided enroll/transfer failed:", err);
+        const errText = `Couldn't finish that — ${err.message || "something went wrong"}.`;
+        await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
+        remember(remoteJid, "assistant", errText);
+      }
+      return true;
+    }
+    if (NO_WORDS.test(trimmed)) {
+      clearFlow(senderJid);
+      const text = "Cancelled.";
+      await activeSock.sendMessage(remoteJid, { text });
+      remember(remoteJid, "assistant", text);
+      return true;
+    }
+    const text = "Reply YES to confirm or NO to cancel.";
+    await activeSock.sendMessage(remoteJid, { text });
+    return true;
+  }
+
+  return false;
+}
+
 // approve / reject / remove all key off the same pending-enrollment lookup
 // (see findMatchingPendingEnrollments) — remove only resolves a *pending*
 // request this way; removing an already-active student by name isn't
@@ -560,6 +823,9 @@ const ADMIN_HELP_LINES = [
   '• "approve <student> [for <course>]" / "reject <student>[: <reason>]" — decides a pending enrollment request.',
   '• "enroll <student> in <course>" — grants immediate course/batch access, skipping the pending step.',
   '• "remove <student> from <course>" — bans their pending request (doesn\'t touch an already-active student yet).',
+  '• "enroll this student <email>" — guided flow: pick a course, pick a batch, confirm, done.',
+  '• "change/move/transfer <email>\'s batch" — guided flow to move them to a different course/batch (adds the new one; doesn\'t auto-remove the old enrollment yet).',
+  '• "list students in <course>" — tells you plainly this isn\'t possible yet (the LMS has no roster endpoint).',
 ];
 
 // Admin commands only show up in the help text for admins — a student
@@ -704,10 +970,29 @@ const CHECK_ENROLLMENTS_PATTERN = /^\s*(?:check|list|show)\s+(?:the\s+)?(?:pendi
 // enrollments. The capture group is whatever's left after "student(s)",
 // which may be empty ("check students") if no identifier was given.
 const CHECK_STUDENT_PATTERN = /^\s*(?:check|find|look\s*up|search(?:\s+for)?)\s+(?:the\s+)?student('s)?s?\s*(.*)$/i;
+// "enroll this student <email>" / "enroll student: <email>" — the guided
+// menu flow, as opposed to ENROLL_PATTERN's one-line "enroll X in Y" form.
+// Checked only after ENROLL_PATTERN fails, so a course-specifying command
+// is never mistaken for this one.
+const GUIDED_ENROLL_PATTERN = /^\s*enroll\s+(?:this\s+)?student\s*[:\-]?\s*(\S+@\S+\.\S+)\s*$/i;
+// "change <email> batch" / "move <email> to another batch" / "transfer
+// student <email>" — the guided batch-change flow. Requires the word
+// "batch" to be present so it doesn't fire on unrelated sentences.
+const TRANSFER_PATTERN = /^\s*(?:change|move|transfer)\b(?=.*\bbatch\b).*?(\S+@\S+\.\S+)/i;
+// "list students in/of <course>" — a full roster request. The LMS doesn't
+// currently expose a course-roster endpoint (only per-student search and
+// per-batch counts), so this is handled honestly rather than guessed at —
+// see handleCourseRosterCommand.
+const COURSE_ROSTER_PATTERN =
+  /^\s*(?:list|show|get)\s+(?:the\s+)?students?\s+(?:(?:enrolled|registered)\s+)?(?:in|of|for)\s+(.+?)\s*$/i;
 
 function parseEnrollmentCommand(text) {
   if (CHECK_ENROLLMENTS_PATTERN.test(text)) {
     return { action: "list" };
+  }
+  const rosterMatch = text.match(COURSE_ROSTER_PATTERN);
+  if (rosterMatch) {
+    return { action: "course_roster", course: rosterMatch[1].trim() };
   }
   const studentMatch = text.match(CHECK_STUDENT_PATTERN);
   if (studentMatch) {
@@ -728,6 +1013,14 @@ function parseEnrollmentCommand(text) {
   const removeMatch = text.match(REMOVE_PATTERN);
   if (removeMatch) {
     return { action: "remove", student: removeMatch[1].trim(), course: removeMatch[2].trim() };
+  }
+  const transferMatch = text.match(TRANSFER_PATTERN);
+  if (transferMatch) {
+    return { action: "start_transfer", email: transferMatch[1] };
+  }
+  const guidedEnrollMatch = text.match(GUIDED_ENROLL_PATTERN);
+  if (guidedEnrollMatch) {
+    return { action: "start_enroll", email: guidedEnrollMatch[1] };
   }
   return null;
 }
@@ -1106,6 +1399,17 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
     // Learn who's speaking, silently — never changes what gets replied.
     maybeLearnIntroduction(senderJid, askText).catch(() => {});
 
+    // An admin mid guided-enroll/transfer flow gets intercepted here, before
+    // any of the regular command parsing below — their numbered replies
+    // ("2", "yes", "cancel") aren't meant for the general dispatch chain.
+    if (isWhatsAppAdmin(senderJid)) {
+      const flowHandled = await handleActiveFlowMessage(activeSock, remoteJid, senderJid, askText);
+      if (flowHandled) {
+        await activeSock.sendPresenceUpdate("paused", remoteJid).catch(() => {});
+        return;
+      }
+    }
+
         const rememberMatch = askText.match(REMEMBER_PATTERN);
         const whatRemember = !rememberMatch && WHAT_REMEMBER_PATTERN.test(askText);
         const forgetMe = !rememberMatch && !whatRemember && FORGET_ME_PATTERN.test(askText);
@@ -1167,17 +1471,31 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             await sendWorkingNotice(activeSock, remoteJid, "🔎 Checking the LMS…");
             try {
               let resultText;
+              let flowStarted = false;
               if (enrollmentCommand.action === "list") {
                 resultText = await handleListPendingCommand();
               } else if (enrollmentCommand.action === "find_student") {
                 resultText = await handleFindStudentCommand(enrollmentCommand.query);
+              } else if (enrollmentCommand.action === "course_roster") {
+                resultText = await handleCourseRosterCommand(enrollmentCommand.course);
               } else if (enrollmentCommand.action === "enroll") {
                 resultText = await handleEnrollCommand(enrollmentCommand, adminPhoneNumber);
+              } else if (enrollmentCommand.action === "start_enroll") {
+                resultText = await startEnrollFlow(activeSock, remoteJid, senderJid, enrollmentCommand.email, adminPhoneNumber);
+                flowStarted = true;
+              } else if (enrollmentCommand.action === "start_transfer") {
+                resultText = await startTransferFlow(activeSock, remoteJid, senderJid, enrollmentCommand.email, adminPhoneNumber);
+                flowStarted = true;
               } else {
                 resultText = await handlePendingEnrollmentCommand(enrollmentCommand, adminPhoneNumber);
               }
-              await activeSock.sendMessage(remoteJid, { text: resultText });
-              remember(remoteJid, "assistant", resultText);
+              // startTransferFlow can send its own message directly (when it
+              // skips straight to the batch menu) and returns null instead
+              // of text in that case — nothing left to send here.
+              if (resultText) {
+                await activeSock.sendMessage(remoteJid, { text: resultText });
+                remember(remoteJid, "assistant", resultText);
+              }
               await db
                 .collection("activity")
                 .add({
@@ -1187,7 +1505,11 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
                       ? "Checked pending enrollments"
                       : enrollmentCommand.action === "find_student"
                         ? `Looked up: ${enrollmentCommand.query || "(no query)"}`
-                        : `${enrollmentCommand.student} — ${enrollmentCommand.course || enrollmentCommand.detail || ""}`.trim(),
+                        : enrollmentCommand.action === "course_roster"
+                          ? `Roster: ${enrollmentCommand.course}`
+                          : flowStarted
+                            ? `${enrollmentCommand.action}: ${enrollmentCommand.email}`
+                            : `${enrollmentCommand.student} — ${enrollmentCommand.course || enrollmentCommand.detail || ""}`.trim(),
                   type: "ok",
                   createdAt: Date.now(),
                 })
