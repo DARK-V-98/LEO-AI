@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const SINHALA_PATTERN = /[඀-෿]/;
+// LEO is a male persona — prefer a voice the OS/browser labels male, or a
+// common male voice name, over whatever the browser's default happens to
+// be (which is very often a female-sounding voice by default on most
+// platforms).
+const MALE_VOICE_HINT =
+  /\bmale\b|Daniel|Matthew|David|Guy|Alex|Fred|George|Oliver|James|Ryan|Mark|Arthur|Eddy|Rishi/i;
 
 /** Wraps the browser's built-in speech synthesis so LEO can actually talk —
  * no extra API/key needed. Returns a promise that resolves once the line
@@ -30,14 +36,14 @@ export function useSpeech() {
 
     const voices = window.speechSynthesis.getVoices();
     const matching = voices.filter((v) => v.lang.toLowerCase().startsWith(langPrefix));
+    const male = matching.filter((v) => MALE_VOICE_HINT.test(v.name));
     const preferred =
-      langPrefix === "en"
-        ? (matching.find((v) =>
-            /Google US English|Google UK English|Natural|Daniel|Matthew|Aria|Samantha/i.test(
-              v.name
-            )
-          ) ?? matching[0])
-        : matching[0];
+      // A male voice that also sounds natural beats a male voice that
+      // doesn't, which beats any non-male match, which beats nothing.
+      male.find((v) => /Natural/i.test(v.name)) ??
+      male[0] ??
+      matching.find((v) => /Google US English|Google UK English|Natural/i.test(v.name)) ??
+      matching[0];
 
     voicesCacheRef.current[langPrefix] = preferred ?? null;
     return preferred ?? null;
@@ -70,7 +76,11 @@ export function useSpeech() {
         if (voice) utter.voice = voice;
 
         utter.rate = isSinhala ? 0.95 : 1.03;
-        utter.pitch = 1.05;
+        // Slightly below neutral (1.0) reads as a lower, more male-leaning
+        // pitch — matters most when no explicitly-male voice was found
+        // above and this is falling back to whatever default voice the
+        // browser picked.
+        utter.pitch = 0.92;
         utter.onstart = () => setSpeaking(true);
         utter.onend = () => {
           setSpeaking(false);

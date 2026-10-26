@@ -45,6 +45,12 @@ function recordGeminiCall(): void {
 
 export type SpeechResult = { audio: string; sampleRate: number };
 
+// "Puck" is one of Gemini TTS's male-sounding prebuilt voices (Google
+// describes it as "Upbeat") — LEO is a male persona, so this replaces the
+// earlier "Kore" (a female-sounding voice) that voice replies were
+// shipping with by mistake.
+const TTS_VOICE_NAME = "Puck";
+
 /** Gemini's TTS model, returning raw 16-bit PCM — verified live against
  * the real API before wiring this in (gemini-2.5-flash-preview-tts returns
  * `audio/L16;codec=pcm;rate=24000`, confirmed for both English and Sinhala
@@ -68,7 +74,7 @@ export async function generateSpeech(text: string): Promise<SpeechResult | null>
           contents: [{ parts: [{ text }] }],
           generationConfig: {
             responseModalities: ["AUDIO"],
-            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } },
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: TTS_VOICE_NAME } } },
           },
         }),
       }
