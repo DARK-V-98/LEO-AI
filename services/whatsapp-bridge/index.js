@@ -50,6 +50,7 @@ const LMS_CHECK_REQUESTS = db.collection("lmsCheckRequests");
 const CLASS_GROUPS = db.collection("classGroups");
 const SCORING_RUBRICS = db.collection("scoringRubrics");
 const ESSAY_SUBMISSIONS = db.collection("essaySubmissions");
+const SPEAKING_SUBMISSIONS = db.collection("speakingSubmissions");
 
 // Optional: a WhatsApp JID (a number like "94771234567@s.whatsapp.net") to
 // send a once-a-day summary of new leads/tasks to. Unset by default — the
@@ -1026,7 +1027,10 @@ function helpTextFor(jid, remoteJid) {
   if (remoteJid && isClassGroup(remoteJid)) {
     lines.push(
       "",
-      'This group is a class — "score this essay: <text>", a photo of a handwritten essay captioned "score this essay", or replying "score this essay" to one you already sent, gets it scored and the feedback DMed to you.'
+      'This group is a class:',
+      '• "score this essay: <text>", a photo of a handwritten essay captioned "score this essay", or replying "score this essay" to one you already sent — scored and DMed to you.',
+      '• "score this read aloud/repeat sentence/retell lecture/respond to a situation/summarize discussion/describe image: <text if needed>" — I\'ll ask for a voice note next, then score it and DM you.',
+      '• "score this answer question: <question> | <expected answer>" — same, for Answer Short Question.'
     );
   }
   lines.push("", "In the company group, say “Leo” so I know you're talking to me.");
@@ -1423,6 +1427,225 @@ async function scoreEssayViaWebsite(payload) {
     throw new Error(body?.error || `Essay scoring failed (HTTP ${res.status})`);
   }
   return res.json(); // { contentScore, formScore, structureScore, grammarScore, vocabularyScore, spellingScore, overallScore, feedback, transcript? }
+}
+
+// --- Speaking task scoring (PTE-style, class groups only) ----------------
+// WhatsApp voice/audio messages have no caption field at all — unlike a
+// photo, there's no way for a command and the voice response to arrive in
+// one message. So this is a two-step flow: "score this <task>[: <ref>]"
+// (SPEAKING_TASK_PATTERN) sets a short-lived pending state for that
+// student in that chat and asks for the voice note; the next bare voice
+// note from that same student in that same chat is treated as the
+// response (see the early intercept in processTurn) — matched entirely
+// in-memory, same pattern as enrollFlows/pendingTurns elsewhere here.
+const SPEAKING_TASK_PATTERN =
+  /^\s*score\s+(?:this|my)\s+(read\s+aloud|repeat\s+(?:the\s+)?sentence|retell\s+(?:the\s+)?lecture|respond\s+to\s+(?:a\s+|the\s+)?situation|summarize\s+(?:the\s+)?(?:group\s+)?discussion|answer\s+(?:the\s+)?(?:short\s+)?question|describe\s+(?:the\s+)?image)\s*[:\-]?\s*([\s\S]*)$/i;
+
+const SPEAKING_TASK_ALIASES = {
+  "read aloud": "read_aloud",
+  "repeat sentence": "repeat_sentence",
+  "repeat the sentence": "repeat_sentence",
+  "retell lecture": "retell_lecture",
+  "retell the lecture": "retell_lecture",
+  "respond to a situation": "respond_to_situation",
+  "respond to the situation": "respond_to_situation",
+  "respond to situation": "respond_to_situation",
+  "summarize discussion": "summarize_group_discussion",
+  "summarize the discussion": "summarize_group_discussion",
+  "summarize group discussion": "summarize_group_discussion",
+  "summarize the group discussion": "summarize_group_discussion",
+  "answer question": "answer_short_question",
+  "answer the question": "answer_short_question",
+  "answer short question": "answer_short_question",
+  "answer the short question": "answer_short_question",
+  "describe image": "describe_image",
+  "describe the image": "describe_image",
+};
+
+const SPEAKING_TASK_COMMAND_LABELS = {
+  read_aloud: "read aloud",
+  repeat_sentence: "repeat sentence",
+  retell_lecture: "retell lecture",
+  respond_to_situation: "respond to a situation",
+  summarize_group_discussion: "summarize discussion",
+  answer_short_question: "answer question",
+  describe_image: "describe image",
+};
+
+const SPEAKING_TASK_DISPLAY_LABELS = {
+  read_aloud: "Read Aloud",
+  repeat_sentence: "Repeat Sentence",
+  retell_lecture: "Retell Lecture",
+  respond_to_situation: "Respond to a Situation",
+  summarize_group_discussion: "Summarize Group Discussion",
+  answer_short_question: "Answer Short Question",
+  describe_image: "Describe Image",
+};
+
+function parseSpeakingTaskRequest(text) {
+  const m = text.match(SPEAKING_TASK_PATTERN);
+  if (!m) return null;
+  const phrase = m[1].trim().toLowerCase().replace(/\s+/g, " ");
+  const taskType = SPEAKING_TASK_ALIASES[phrase];
+  if (!taskType) return null;
+  return { taskType, referenceText: m[2].trim() || null };
+}
+
+const SPEAKING_PENDING_TTL_MS = 10 * 60 * 1000;
+const pendingSpeaking = new Map(); // "remoteJid:senderJid" -> { taskType, referenceText?, expectedAnswer?, image?, updatedAt }
+
+function speakingPendingKey(remoteJid, senderJid) {
+  return `${remoteJid}:${senderJid}`;
+}
+
+function setPendingSpeaking(remoteJid, senderJid, state) {
+  state.updatedAt = Date.now();
+  pendingSpeaking.set(speakingPendingKey(remoteJid, senderJid), state);
+}
+
+function getPendingSpeaking(remoteJid, senderJid) {
+  const key = speakingPendingKey(remoteJid, senderJid);
+  const state = pendingSpeaking.get(key);
+  if (!state) return null;
+  if (Date.now() - state.updatedAt > SPEAKING_PENDING_TTL_MS) {
+    pendingSpeaking.delete(key);
+    return null;
+  }
+  return state;
+}
+
+function clearPendingSpeaking(remoteJid, senderJid) {
+  pendingSpeaking.delete(speakingPendingKey(remoteJid, senderJid));
+}
+
+async function scoreSpeakingViaWebsite(payload) {
+  if (!WEB_BASE_URL) {
+    throw new Error("LEO_WEB_BASE_URL is not set");
+  }
+  const res = await fetch(`${WEB_BASE_URL}/api/score-speaking`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `Speaking scoring failed (HTTP ${res.status})`);
+  }
+  return res.json(); // { transcript, contentScore?, isCorrect?, pronunciationScore, fluencyScore, overallScore, feedback }
+}
+
+/** Step 1 of the speaking-scoring flow: resolves whatever reference
+ * material the task needs (text, an image, or a question+expected
+ * answer), stores the pending state if everything's there, and returns
+ * the message to send back either way (the "send your voice note now"
+ * prompt, or what's still missing). Never throws — a bad/incomplete
+ * command is a normal reply, not an error. */
+async function handleSpeakingTaskTrigger(remoteJid, senderJid, attachment, taskType, referenceText) {
+  const pendingState = { taskType };
+
+  if (taskType === "describe_image") {
+    const img = attachment?.kind === "image" ? attachment : null;
+    if (!img) {
+      return 'Send the image (or reply "score this describe image" to the image you want described) and I\'ll ask for your voice response.';
+    }
+    pendingState.image = { data: img.data, mimeType: img.mimeType };
+  } else if (taskType === "answer_short_question") {
+    const [questionRaw, answerRaw] = (referenceText || "").split("|");
+    const question = questionRaw?.trim();
+    const expectedAnswer = answerRaw?.trim();
+    if (!question || !expectedAnswer) {
+      return 'Give me the question and the expected answer, separated by "|" — e.g. "score this answer question: What color is the sky? | blue".';
+    }
+    pendingState.referenceText = question;
+    pendingState.expectedAnswer = expectedAnswer;
+  } else if (!referenceText) {
+    return `Include the text — e.g. "score this ${SPEAKING_TASK_COMMAND_LABELS[taskType]}: <text>".`;
+  } else {
+    pendingState.referenceText = referenceText;
+  }
+
+  setPendingSpeaking(remoteJid, senderJid, pendingState);
+  return "Got it — now send a voice note with your response (within 10 minutes).";
+}
+
+/** Step 2: a bare voice note arriving while there's a pending speaking
+ * task for this student in this chat. Always returns true (handled) once
+ * a pending state exists — even the "I don't know you yet" case, since
+ * it needs its own reply instead of falling through to normal chat. */
+async function handleSpeakingResponse(activeSock, remoteJid, senderJid, pending, attachment) {
+  const person = await lookupPerson(senderJid);
+  if (!person) {
+    const text =
+      "Haven't met you yet — what's your name, so I can keep your scores under it? Introduce yourself, then send that voice note again.";
+    await activeSock.sendMessage(remoteJid, { text });
+    remember(remoteJid, "assistant", text);
+    return true;
+  }
+
+  clearPendingSpeaking(remoteJid, senderJid);
+  await sendWorkingNotice(activeSock, remoteJid, "🎤 Listening and scoring that — this can take a minute…");
+  try {
+    const result = await scoreSpeakingViaWebsite({
+      taskType: pending.taskType,
+      audioBase64: attachment.data,
+      audioMimeType: attachment.mimeType,
+      referenceText: pending.referenceText || undefined,
+      expectedAnswer: pending.expectedAnswer || undefined,
+      imageBase64: pending.image?.data,
+      imageMimeType: pending.image?.mimeType,
+    });
+
+    await SPEAKING_SUBMISSIONS.add({
+      studentJid: senderJid,
+      studentName: person.name,
+      groupJid: remoteJid,
+      taskType: pending.taskType,
+      transcript: result.transcript,
+      contentScore: result.contentScore ?? null,
+      isCorrect: result.isCorrect ?? null,
+      pronunciationScore: result.pronunciationScore,
+      fluencyScore: result.fluencyScore,
+      overallScore: result.overallScore,
+      feedback: result.feedback,
+      createdAt: Date.now(),
+    });
+
+    const label = SPEAKING_TASK_DISPLAY_LABELS[pending.taskType] || pending.taskType;
+    const contentLine =
+      pending.taskType === "answer_short_question"
+        ? `Correct: ${result.isCorrect ? "Yes" : "No"}`
+        : `Content: ${Math.round(result.contentScore)}/90`;
+    const dmText =
+      `${label} score: ${Math.round(result.overallScore)}/90\n\n` +
+      `${contentLine}\n` +
+      `Pronunciation: ${Math.round(result.pronunciationScore)}/90\n` +
+      `Fluency: ${Math.round(result.fluencyScore)}/90\n\n` +
+      `Transcript: "${result.transcript}"\n\n` +
+      `${result.feedback}`;
+    await ensureHistoryLoaded(senderJid);
+    await activeSock.sendMessage(senderJid, { text: dmText });
+    remember(senderJid, "assistant", dmText);
+
+    const ackText = `Scored — sent ${person.name} the feedback privately.`;
+    await activeSock.sendMessage(remoteJid, { text: ackText });
+    remember(remoteJid, "assistant", `LEO (to ${person.name}): ${ackText}`);
+
+    await db
+      .collection("activity")
+      .add({
+        title: "Scored a speaking task on WhatsApp",
+        detail: `${person.name} — ${label} — ${Math.round(result.overallScore)}/90`,
+        type: "ok",
+        createdAt: Date.now(),
+      })
+      .catch(() => {});
+  } catch (err) {
+    console.error("Speaking scoring failed:", err);
+    const errText = `Couldn't score that — ${err.message || "try again shortly"}.`;
+    await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
+    remember(remoteJid, "assistant", errText);
+  }
+  return true;
 }
 
 function slugifyFileName(text) {
@@ -1967,6 +2190,17 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
       }
     }
 
+    // A bare voice note arriving while this student has a pending speaking
+    // task in this chat (step 2 of the "score this <task>" flow — see
+    // handleSpeakingTaskTrigger/handleSpeakingResponse) is their response,
+    // not something for the general dispatch chain below.
+    const pendingSpeech = getPendingSpeaking(remoteJid, senderJid);
+    if (pendingSpeech && attachment?.kind === "audio") {
+      await handleSpeakingResponse(activeSock, remoteJid, senderJid, pendingSpeech, attachment);
+      await activeSock.sendPresenceUpdate("paused", remoteJid).catch(() => {});
+      return;
+    }
+
         const rememberMatch = askText.match(REMEMBER_PATTERN);
         const whatRemember = !rememberMatch && WHAT_REMEMBER_PATTERN.test(askText);
         const forgetMe = !rememberMatch && !whatRemember && FORGET_ME_PATTERN.test(askText);
@@ -1982,6 +2216,16 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !posterMatch
             ? parseEssayScoreRequest(askText)
             : null;
+        const speakingTaskRequest =
+          !rememberMatch &&
+          !whatRemember &&
+          !forgetMe &&
+          !enrollmentCommand &&
+          !pollMatch &&
+          !posterMatch &&
+          !essayScoreRequest
+            ? parseSpeakingTaskRequest(askText)
+            : null;
         // Only treated as a revision request when there's actually a
         // document to revise in this chat — otherwise an unrelated
         // sentence that happens to say "update the document" just falls
@@ -1994,6 +2238,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !pollMatch &&
           !posterMatch &&
           !essayScoreRequest &&
+          !speakingTaskRequest &&
           getLastDocument(remoteJid)
             ? parseDocumentUpdateRequest(askText)
             : null;
@@ -2005,6 +2250,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !pollMatch &&
           !posterMatch &&
           !essayScoreRequest &&
+          !speakingTaskRequest &&
           !documentUpdateInstruction
             ? parseDocumentRequest(askText)
             : null;
@@ -2015,6 +2261,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !enrollmentCommand &&
           !pollMatch &&
           !essayScoreRequest &&
+          !speakingTaskRequest &&
           !documentUpdateInstruction &&
           !documentTopic
             ? parseReminder(askText)
@@ -2026,6 +2273,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !enrollmentCommand &&
           !pollMatch &&
           !essayScoreRequest &&
+          !speakingTaskRequest &&
           !documentUpdateInstruction &&
           !documentTopic &&
           !reminder
@@ -2275,6 +2523,30 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
             remember(remoteJid, "assistant", errText);
           }
+        } else if (speakingTaskRequest) {
+          try {
+            if (!isGroup || !isClassGroup(remoteJid)) {
+              const text =
+                "Speaking practice scoring is only available inside a group marked as a class — ask the developer to turn it on for this group if it should be one.";
+              await activeSock.sendMessage(remoteJid, { text });
+              remember(remoteJid, "assistant", text);
+            } else {
+              const replyText = await handleSpeakingTaskTrigger(
+                remoteJid,
+                senderJid,
+                attachment,
+                speakingTaskRequest.taskType,
+                speakingTaskRequest.referenceText
+              );
+              await activeSock.sendMessage(remoteJid, { text: replyText });
+              remember(remoteJid, "assistant", replyText);
+            }
+          } catch (err) {
+            console.error("Speaking task setup failed:", err);
+            const errText = `Couldn't set that up — ${err.message || "try again shortly"}.`;
+            await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
+            remember(remoteJid, "assistant", errText);
+          }
         } else if (documentUpdateInstruction) {
           try {
             const previousDoc = getLastDocument(remoteJid);
@@ -2490,11 +2762,20 @@ function attachMessageHandler(activeSock) {
         if (!text && !hasMedia) continue;
 
         const isGroup = remoteJid.endsWith("@g.us");
+        // Reminders are personal — if said inside a group, reply to the
+        // person who asked, not the whole group.
+        const senderJid = isGroup ? msg.key.participant || remoteJid : remoteJid;
+
         // In a group, a bare photo/voice note with no mention at all isn't
         // meant for LEO — he only joins in when actually addressed, either
         // as this message's own caption or (resolved later, via the quoted
         // message) as a reply to a piece of media: "Leo, what does this say".
-        if (isGroup && !MENTION_PATTERN.test(text || "")) continue;
+        // The one exception: a bare voice note is exactly what's expected
+        // as step 2 of "score this <speaking task>" — that student already
+        // addressed LEO explicitly to start the flow, so a silent voice
+        // note right after it is unambiguous, not a stray group message.
+        const isPendingSpeechReply = isGroup && hasAudio && !text && Boolean(getPendingSpeaking(remoteJid, senderJid));
+        if (isGroup && !MENTION_PATTERN.test(text || "") && !isPendingSpeechReply) continue;
 
         // Best-effort: cache this group's display name so it shows up as
         // something a developer can recognize in the dashboard's "Class
@@ -2510,9 +2791,6 @@ function attachMessageHandler(activeSock) {
         }
 
         const askText = isGroup && text ? text.replace(MENTION_PATTERN, "").trim() || text : text;
-        // Reminders are personal — if said inside a group, reply to the
-        // person who asked, not the whole group.
-        const senderJid = isGroup ? msg.key.participant || remoteJid : remoteJid;
 
         await activeSock.sendPresenceUpdate("composing", remoteJid).catch(() => {});
 

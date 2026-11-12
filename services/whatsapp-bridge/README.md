@@ -132,6 +132,41 @@ dates, not the AI — so these are fast and don't cost an AI call):
     `scoringRubrics` collection (one document, seeded by a one-off script)
     rather than being hardcoded, so swapping in an updated rubric later is
     a data change in Firestore, not a code change here.
+- **Speaking-task scoring (PTE-style)**: all 7 PTE speaking tasks — Read
+  Aloud, Repeat Sentence, Describe Image, Retell Lecture, Answer Short
+  Question, Respond to a Situation, Summarize Group Discussion — same
+  class-group gating as essay scoring. `"score this read aloud: <text>"` /
+  `"score this describe image"` / `"score this answer question: <question>
+  | <expected answer>"` etc. (`SPEAKING_TASK_ALIASES` in `index.js` lists
+  every phrasing accepted per task).
+  - **Why this is two steps, not one**: a WhatsApp audio/voice message has
+    no caption field at all — there's no way for the trigger command and
+    the actual voice response to arrive in the same message, unlike a
+    photo. So `"score this <task>..."` resolves whatever reference
+    material that task needs (text, an image, or a question + expected
+    answer), stores it in memory for that student in that chat (10-minute
+    TTL, same pattern as `enrollFlows`), and asks for a voice note. The
+    very next bare voice note from that same student in that same chat is
+    treated as the response — intercepted early in `processTurn`, before
+    the general dispatch chain, the same way an admin's guided-flow
+    replies are.
+  - **The one deliberate exception to "needs a mention"**: normally a bare
+    voice note in a group with no "Leo" mention is ignored outright (he
+    only joins when actually addressed). A pending speaking task is the
+    one case where that's bypassed — the student already addressed LEO
+    explicitly to start the flow, so a silent voice note right after it is
+    unambiguous.
+  - **Scoring**: Content (or `isCorrect` for Answer Short Question),
+    Pronunciation, and Fluency, each out of 90, averaged for the overall
+    score — the exact rubric and prompting approach from all 7 of
+    SmartLabs' own `score-pte-speaking-*.ts` flows, ported as-is. A new
+    `scoreSpeaking()` in `llmRouter.ts` sends the audio (and the image, for
+    Describe Image) straight to Gemini as `inlineData`, through a new
+    `/api/score-speaking` route.
+  - **Same privacy/storage pattern as essays**: full breakdown + transcript
+    DMed to the student, a short acknowledgement in the group, every
+    submission saved to a new `speakingSubmissions` collection
+    (developer-read-only).
 - **Reminders**: `remind me in 20 minutes to call the vendor` or
   `remind me tomorrow at 9am to send the SEO report` — LEO replies
   confirming the time, then DMs you back at that time. If no time is

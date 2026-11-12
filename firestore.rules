@@ -147,5 +147,9 @@ service cloud.firestore {
       allow read: if isDeveloper();
       allow write: if false;
     }
+    match /speakingSubmissions/{id} {
+      allow read: if isDeveloper();
+      allow write: if false;
+    }
   }
 }
