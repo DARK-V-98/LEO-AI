@@ -122,5 +122,30 @@ service cloud.firestore {
       allow create: if isDeveloper();
       allow update, delete: if false;
     }
+
+    // Groups LEO's been told to treat as a class, for essay/speaking
+    // scoring — developer-only, same reasoning as whatsappAdmins: this
+    // turns on a real feature inside a group, so only the dashboard (never
+    // WhatsApp itself) can grant it.
+    match /classGroups/{groupJid} {
+      allow read: if isDeveloper();
+      allow create, update, delete: if isDeveloper();
+    }
+
+    // Scoring rubrics (PTE Write Essay, etc.) — seeded via the Admin SDK,
+    // not hand-edited from the dashboard today. Developer-read only, same
+    // as the other bridge-owned config collections.
+    match /scoringRubrics/{id} {
+      allow read: if isDeveloper();
+      allow write: if false;
+    }
+
+    // Scored essay/speaking submissions — written only by the bridge
+    // worker (Admin SDK) once it scores something. Developer-only read:
+    // this is a specific student's graded work, not general company data.
+    match /essaySubmissions/{id} {
+      allow read: if isDeveloper();
+      allow write: if false;
+    }
   }
 }

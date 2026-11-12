@@ -47,6 +47,9 @@ const TASKS = db.collection("tasks");
 const WHATSAPP_ADMINS = db.collection("whatsappAdmins");
 const LMS_STATUS_DOC = db.collection("lms").doc("status");
 const LMS_CHECK_REQUESTS = db.collection("lmsCheckRequests");
+const CLASS_GROUPS = db.collection("classGroups");
+const SCORING_RUBRICS = db.collection("scoringRubrics");
+const ESSAY_SUBMISSIONS = db.collection("essaySubmissions");
 
 // Optional: a WhatsApp JID (a number like "94771234567@s.whatsapp.net") to
 // send a once-a-day summary of new leads/tasks to. Unset by default — the
@@ -680,6 +683,30 @@ function isWhatsAppAdmin(jid) {
   return adminJids.has(jid);
 }
 
+// --- Class groups (essay/speaking scoring) -------------------------------
+// Scoring only ever runs for a message that actually came from inside a
+// group the developer marked as a class — never a DM, never an
+// unmarked group. Since WhatsApp only delivers a group message from an
+// actual member of that group, "came from a marked class group" already
+// means "is a student in that class" — no separate membership check
+// needed on top of this. Same live-listener pattern as adminJids.
+const classGroupJids = new Map(); // jid -> {className, subject}
+CLASS_GROUPS.onSnapshot(
+  (snap) => {
+    classGroupJids.clear();
+    snap.docs.forEach((d) => classGroupJids.set(d.id, d.data()));
+  },
+  (err) => console.error("Failed to watch classGroups:", err)
+);
+
+function isClassGroup(jid) {
+  return classGroupJids.has(jid);
+}
+
+function getClassGroup(jid) {
+  return classGroupJids.get(jid) || null;
+}
+
 const AUTH_DIR = process.env.AUTH_DIR || "./auth_info";
 const logger = pino({ level: process.env.LOG_LEVEL || "warn" });
 
@@ -991,10 +1018,17 @@ const ADMIN_HELP_LINES = [
 
 // Admin commands only show up in the help text for admins — a student
 // seeing a list of things they can't actually use would just be
-// confusing (or an invitation to try anyway).
-function helpTextFor(jid) {
+// confusing (or an invitation to try anyway). The essay-scoring line only
+// shows up inside a group actually marked as a class, same reasoning.
+function helpTextFor(jid, remoteJid) {
   const lines = [...BASE_HELP_LINES];
   if (isWhatsAppAdmin(jid)) lines.push(...ADMIN_HELP_LINES);
+  if (remoteJid && isClassGroup(remoteJid)) {
+    lines.push(
+      "",
+      'This group is a class — "score this essay: <text>", a photo of a handwritten essay captioned "score this essay", or replying "score this essay" to one you already sent, gets it scored and the feedback DMed to you.'
+    );
+  }
   lines.push("", "In the company group, say “Leo” so I know you're talking to me.");
   return lines.join("\n");
 }
@@ -1350,6 +1384,47 @@ async function reviseDocumentOnTopic(previousMarkdown, instruction, context) {
   return res.json(); // { title, markdown, sources: [{title, url}] }
 }
 
+// --- Essay scoring (PTE-style, class groups only) ------------------------
+// "score this essay[: <text>]" / "score my essay" — essay keyword is
+// optional so "score this" works as a bare photo caption too. Only ever
+// dispatched inside a group the developer marked as a class (see
+// isClassGroup) — gating is enforced where this is handled, not here,
+// since the pattern itself should still match in a DM so the admin gets a
+// clear "not available here" message instead of silently falling through
+// to normal chat.
+const ESSAY_SCORE_PATTERN = /^\s*score\s+(?:this|my)(?:\s+essay)?\b\s*[:\-]?\s*([\s\S]*)$/i;
+
+function parseEssayScoreRequest(text) {
+  const m = text.match(ESSAY_SCORE_PATTERN);
+  if (!m) return null;
+  return { inlineEssay: m[1].trim() || null };
+}
+
+// A reply quoting an earlier plain-text message (not media — getAttachment
+// already resolves a quoted photo/voice/document) — covers "paste the
+// essay, then later reply 'score this essay' to it."
+function getQuotedText(msg) {
+  const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+  if (!quoted) return null;
+  return quoted.conversation || quoted.extendedTextMessage?.text || null;
+}
+
+async function scoreEssayViaWebsite(payload) {
+  if (!WEB_BASE_URL) {
+    throw new Error("LEO_WEB_BASE_URL is not set");
+  }
+  const res = await fetch(`${WEB_BASE_URL}/api/essay-score`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || `Essay scoring failed (HTTP ${res.status})`);
+  }
+  return res.json(); // { contentScore, formScore, structureScore, grammarScore, vocabularyScore, spellingScore, overallScore, feedback, transcript? }
+}
+
 function slugifyFileName(text) {
   return (
     text
@@ -1681,8 +1756,8 @@ function parseGroupSend(text) {
   return { groupNameRaw, message: message || groupNameRaw, due };
 }
 
-// Cache of group name -> jid, since listing groups is a real WhatsApp call.
-let groupCache = { fetchedAt: 0, byName: new Map() };
+// Cache of group name <-> jid, since listing groups is a real WhatsApp call.
+let groupCache = { fetchedAt: 0, byName: new Map(), byJid: new Map() };
 const GROUP_CACHE_TTL_MS = 5 * 60 * 1000;
 
 async function getGroupsByName(activeSock) {
@@ -1691,11 +1766,15 @@ async function getGroupsByName(activeSock) {
   }
   const groups = await activeSock.groupFetchAllParticipating();
   const byName = new Map();
+  const byJid = new Map();
   for (const jid of Object.keys(groups)) {
     const subject = groups[jid]?.subject;
-    if (subject) byName.set(subject.toLowerCase(), jid);
+    if (subject) {
+      byName.set(subject.toLowerCase(), jid);
+      byJid.set(jid, subject);
+    }
   }
-  groupCache = { fetchedAt: Date.now(), byName };
+  groupCache = { fetchedAt: Date.now(), byName, byJid };
   return byName;
 }
 
@@ -1707,6 +1786,14 @@ async function resolveGroup(activeSock, nameQuery) {
     if (name.includes(q) || q.includes(name)) return { jid, name };
   }
   return null;
+}
+
+// Best-effort display name for a group, for the dashboard's "Class groups"
+// picker — whatsappChats only ever had the bare jid before this, which
+// isn't something a developer can pick a class out of.
+async function getGroupName(activeSock, jid) {
+  await getGroupsByName(activeSock);
+  return groupCache.byJid.get(jid) || null;
 }
 
 async function scheduleMessage({ type, targetJid, targetLabel, message, dueAt, createdBy }) {
@@ -1891,12 +1978,23 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch
             ? askText.match(POSTER_PATTERN)
             : null;
+        const essayScoreRequest =
+          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !posterMatch
+            ? parseEssayScoreRequest(askText)
+            : null;
         // Only treated as a revision request when there's actually a
         // document to revise in this chat — otherwise an unrelated
         // sentence that happens to say "update the document" just falls
         // through to normal chat instead of hijacking it.
         const documentUpdateInstruction =
-          !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !posterMatch && getLastDocument(remoteJid)
+          !rememberMatch &&
+          !whatRemember &&
+          !forgetMe &&
+          !enrollmentCommand &&
+          !pollMatch &&
+          !posterMatch &&
+          !essayScoreRequest &&
+          getLastDocument(remoteJid)
             ? parseDocumentUpdateRequest(askText)
             : null;
         const documentTopic =
@@ -1906,6 +2004,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !enrollmentCommand &&
           !pollMatch &&
           !posterMatch &&
+          !essayScoreRequest &&
           !documentUpdateInstruction
             ? parseDocumentRequest(askText)
             : null;
@@ -1915,6 +2014,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !forgetMe &&
           !enrollmentCommand &&
           !pollMatch &&
+          !essayScoreRequest &&
           !documentUpdateInstruction &&
           !documentTopic
             ? parseReminder(askText)
@@ -1925,6 +2025,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !forgetMe &&
           !enrollmentCommand &&
           !pollMatch &&
+          !essayScoreRequest &&
           !documentUpdateInstruction &&
           !documentTopic &&
           !reminder
@@ -1932,7 +2033,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             : null;
 
         if (HELP_PATTERN.test(askText)) {
-          const helpText = helpTextFor(senderJid);
+          const helpText = helpTextFor(senderJid, remoteJid);
           await activeSock.sendMessage(remoteJid, { text: helpText });
           remember(remoteJid, "assistant", helpText);
         } else if (whatRemember) {
@@ -2077,6 +2178,101 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           } catch (err) {
             const errText = `Couldn't generate that poster — ${err.message || "try again shortly"}.`;
             await activeSock.sendMessage(remoteJid, { text: errText });
+            remember(remoteJid, "assistant", errText);
+          }
+        } else if (essayScoreRequest) {
+          try {
+            if (!isGroup || !isClassGroup(remoteJid)) {
+              const text =
+                "Essay scoring is only available inside a group marked as a class — ask the developer to turn it on for this group if it should be one.";
+              await activeSock.sendMessage(remoteJid, { text });
+              remember(remoteJid, "assistant", text);
+            } else {
+              // Resolve the essay itself: inline text in the command > a
+              // photo (this message's own, or a quoted one — getAttachment
+              // already resolves both) > a quoted plain-text message.
+              let essayText = essayScoreRequest.inlineEssay;
+              const photoAttachment = !essayText && attachment?.kind === "image" ? attachment : null;
+              if (!essayText && !photoAttachment) {
+                const quotedText = getQuotedText(msg);
+                if (quotedText) essayText = quotedText.trim();
+              }
+
+              if (!essayText && !photoAttachment) {
+                const text =
+                  'Paste the essay text, send a photo of it, or reply "score this essay" to the essay you already sent.';
+                await activeSock.sendMessage(remoteJid, { text });
+                remember(remoteJid, "assistant", text);
+              } else {
+                const person = await lookupPerson(senderJid);
+                if (!person) {
+                  const text =
+                    "Haven't met you yet — what's your name, so I can keep your scores under it? Reply with your name, then send \"score this essay\" again.";
+                  await activeSock.sendMessage(remoteJid, { text });
+                  remember(remoteJid, "assistant", text);
+                } else {
+                  await sendWorkingNotice(
+                    activeSock,
+                    remoteJid,
+                    "📝 Reading and scoring that essay — this can take a minute…"
+                  );
+                  const result = await scoreEssayViaWebsite(
+                    photoAttachment
+                      ? { image: { data: photoAttachment.data, mimeType: photoAttachment.mimeType } }
+                      : { essay: essayText }
+                  );
+                  const finalEssayText = result.transcript || essayText;
+
+                  await ESSAY_SUBMISSIONS.add({
+                    studentJid: senderJid,
+                    studentName: person.name,
+                    groupJid: remoteJid,
+                    essayText: finalEssayText,
+                    source: photoAttachment ? "photo" : "text",
+                    contentScore: result.contentScore,
+                    formScore: result.formScore,
+                    structureScore: result.structureScore,
+                    grammarScore: result.grammarScore,
+                    vocabularyScore: result.vocabularyScore,
+                    spellingScore: result.spellingScore,
+                    overallScore: result.overallScore,
+                    feedback: result.feedback,
+                    createdAt: Date.now(),
+                  });
+
+                  const dmText =
+                    `Essay score: ${result.overallScore}/13\n\n` +
+                    `Content: ${result.contentScore}/3\n` +
+                    `Form (word count): ${result.formScore}/2\n` +
+                    `Structure & coherence: ${result.structureScore}/2\n` +
+                    `Grammar: ${result.grammarScore}/2\n` +
+                    `Vocabulary: ${result.vocabularyScore}/2\n` +
+                    `Spelling: ${result.spellingScore}/2\n\n` +
+                    `${result.feedback}`;
+                  await ensureHistoryLoaded(senderJid);
+                  await activeSock.sendMessage(senderJid, { text: dmText });
+                  remember(senderJid, "assistant", dmText);
+
+                  const ackText = `Scored — sent ${person.name} the feedback privately.`;
+                  await activeSock.sendMessage(remoteJid, { text: ackText });
+                  remember(remoteJid, "assistant", isGroup ? `LEO (to ${person.name}): ${ackText}` : ackText);
+
+                  await db
+                    .collection("activity")
+                    .add({
+                      title: "Scored an essay on WhatsApp",
+                      detail: `${person.name} — ${result.overallScore}/13`,
+                      type: "ok",
+                      createdAt: Date.now(),
+                    })
+                    .catch(() => {});
+                }
+              }
+            }
+          } catch (err) {
+            console.error("Essay scoring failed:", err);
+            const errText = `Couldn't score that essay — ${err.message || "try again shortly"}.`;
+            await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
             remember(remoteJid, "assistant", errText);
           }
         } else if (documentUpdateInstruction) {
@@ -2299,6 +2495,19 @@ function attachMessageHandler(activeSock) {
         // as this message's own caption or (resolved later, via the quoted
         // message) as a reply to a piece of media: "Leo, what does this say".
         if (isGroup && !MENTION_PATTERN.test(text || "")) continue;
+
+        // Best-effort: cache this group's display name so it shows up as
+        // something a developer can recognize in the dashboard's "Class
+        // groups" picker, instead of a bare JID. Never blocks the turn.
+        if (isGroup) {
+          getGroupName(activeSock, remoteJid)
+            .then((name) => {
+              if (name) {
+                db.collection("whatsappChats").doc(remoteJid).set({ groupName: name }, { merge: true }).catch(() => {});
+              }
+            })
+            .catch(() => {});
+        }
 
         const askText = isGroup && text ? text.replace(MENTION_PATTERN, "").trim() || text : text;
         // Reminders are personal — if said inside a group, reply to the

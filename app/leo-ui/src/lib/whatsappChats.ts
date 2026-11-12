@@ -10,6 +10,7 @@ export type WhatsAppChatSummary = {
   lastMessageAt: number;
   lastMessageText: string;
   lastMessageRole: "user" | "assistant";
+  groupName?: string; // only set for groups, once the bridge has resolved it
 };
 
 export type WhatsAppChatMessage = {

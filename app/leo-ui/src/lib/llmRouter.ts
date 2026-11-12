@@ -229,6 +229,184 @@ export async function reviseDocument(
   );
 }
 
+// --- Essay scoring (PTE-style) -------------------------------------------
+// The exact rubric and prompting approach already live and in production
+// on the SmartLabs website's own AI trainer (DARK-V-98/smartlabs,
+// src/ai/flows/score-pte-writing-write-essay.ts) — ported here as-is
+// rather than inventing a new one, so LEO scores an essay exactly the way
+// that site already does.
+export type EssayScore = {
+  contentScore: number;
+  formScore: number;
+  structureScore: number;
+  grammarScore: number;
+  vocabularyScore: number;
+  spellingScore: number;
+  overallScore: number;
+  feedback: string;
+};
+
+const ESSAY_SCORING_SYSTEM_PROMPT =
+  'You are an expert PTE examiner AI. Your task is to score a "Write Essay" task.\n\n' +
+  "Evaluate the essay based on the following criteria:\n" +
+  "1. Content (0-3 points): Does the essay address all aspects of the topic with relevant ideas and examples?\n" +
+  "2. Form (0-2 points): Is the word count between 200 and 300 words? (2 for in range, 1 for close, 0 for far off).\n" +
+  "3. Development, Structure and Coherence (0-2 points): Is the essay well-organized with a clear introduction, body paragraphs, and conclusion?\n" +
+  "4. Grammar (0-2 points): Is the grammar correct and varied?\n" +
+  "5. Vocabulary (0-2 points): Is the vocabulary range good and used appropriately?\n" +
+  "6. Spelling (0-2 points): Is the spelling correct?\n\n" +
+  "Calculate the score for each criterion, then sum them for 'overallScore' (0-13). " +
+  "Provide specific, constructive feedback in the 'feedback' field explaining the scores for " +
+  "each category and giving concrete, actionable suggestions for improvement — not a vague " +
+  "overall impression. If no topic was given, infer the likely topic from the essay itself " +
+  "and score it on that basis rather than refusing. Respond with exactly the JSON fields " +
+  "requested, nothing else.";
+
+const ESSAY_SCORE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    contentScore: { type: "NUMBER" },
+    formScore: { type: "NUMBER" },
+    structureScore: { type: "NUMBER" },
+    grammarScore: { type: "NUMBER" },
+    vocabularyScore: { type: "NUMBER" },
+    spellingScore: { type: "NUMBER" },
+    overallScore: { type: "NUMBER" },
+    feedback: { type: "STRING" },
+  },
+  required: [
+    "contentScore",
+    "formScore",
+    "structureScore",
+    "grammarScore",
+    "vocabularyScore",
+    "spellingScore",
+    "overallScore",
+    "feedback",
+  ],
+};
+
+// Clamps each score to its real PTE range rather than trusting the model's
+// arithmetic blindly — a cheap sanity check before this goes out as an
+// actual grade.
+function clampEssayScore(raw: Record<string, unknown>): EssayScore {
+  const num = (v: unknown, max: number) =>
+    Math.max(0, Math.min(max, Math.round(Number(v) || 0)));
+  const contentScore = num(raw.contentScore, 3);
+  const formScore = num(raw.formScore, 2);
+  const structureScore = num(raw.structureScore, 2);
+  const grammarScore = num(raw.grammarScore, 2);
+  const vocabularyScore = num(raw.vocabularyScore, 2);
+  const spellingScore = num(raw.spellingScore, 2);
+  return {
+    contentScore,
+    formScore,
+    structureScore,
+    grammarScore,
+    vocabularyScore,
+    spellingScore,
+    overallScore: contentScore + formScore + structureScore + grammarScore + vocabularyScore + spellingScore,
+    feedback: typeof raw.feedback === "string" && raw.feedback.trim() ? raw.feedback.trim() : "No feedback returned.",
+  };
+}
+
+/** Scores an essay the same way the SmartLabs website's PTE Write Essay
+ * trainer does — same rubric, same six criteria, same 0-13 total. Returns
+ * null on any failure (no key, no budget, every model unreachable) rather
+ * than a wrong/guessed score. */
+export async function scoreEssay(essay: string, topic?: string): Promise<EssayScore | null> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || !essay.trim()) return null;
+
+  const prompt =
+    `The user was given the following topic:\n---\nTOPIC: ${
+      topic?.trim() || "(not specified — infer the likely topic from the essay itself)"
+    }\n---\n\n` + `The user wrote the following essay:\n---\nESSAY: ${essay.trim()}\n---\n\nEvaluate it now.`;
+
+  const ESSAY_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"];
+  for (const model of ESSAY_MODELS) {
+    if (!withinGeminiBudget()) return null;
+    try {
+      recordGeminiCall();
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            systemInstruction: { parts: [{ text: ESSAY_SCORING_SYSTEM_PROMPT }] },
+            generationConfig: { responseMimeType: "application/json", responseSchema: ESSAY_SCORE_SCHEMA },
+          }),
+        }
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.find(
+        (p: { text?: string }) => typeof p.text === "string"
+      )?.text;
+      if (!text) continue;
+      const parsed = JSON.parse(text);
+      return clampEssayScore(parsed);
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+const HANDWRITING_TRANSCRIBE_PROMPT =
+  "Transcribe the handwritten text in this image exactly as written — don't " +
+  "correct spelling, grammar, or anything else, and don't skip crossed-out " +
+  "words if they're still legible (mark them as struck through in plain " +
+  "text, e.g. ~~word~~, so the original attempt is still visible to a " +
+  "scorer). Output ONLY the transcribed text, with no preamble, no " +
+  "commentary, and no extra formatting beyond that.";
+
+/** Transcribes a photo of handwritten text (a handwritten essay) into
+ * plain text, so it can go through the same scoring path as a typed
+ * submission. Returns null on failure rather than a guessed/garbled
+ * transcript. */
+export async function transcribeHandwriting(imageBase64: string, mimeType: string): Promise<string | null> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || !imageBase64.trim()) return null;
+
+  const TRANSCRIBE_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"];
+  for (const model of TRANSCRIBE_MODELS) {
+    if (!withinGeminiBudget()) return null;
+    try {
+      recordGeminiCall();
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  { inlineData: { mimeType, data: imageBase64 } },
+                  { text: HANDWRITING_TRANSCRIBE_PROMPT },
+                ],
+              },
+            ],
+          }),
+        }
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.find(
+        (p: { text?: string }) => typeof p.text === "string"
+      )?.text;
+      if (text?.trim()) return text.trim();
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 const SYSTEM_PROMPT =
   "You are LEO, the always-on AI operator for SmartLabs. You help staff with " +
   "daily to-dos, leads, ad performance, SEO, LMS admin, and scheduling. Keep " +

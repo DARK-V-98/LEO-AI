@@ -74,6 +74,64 @@ dates, not the AI — so these are fast and don't cost an AI call):
     after that (or if nothing's been generated yet in that chat), an
     "update the document" message is just treated as normal
     conversation instead of being mistaken for a revision request.
+- **Essay scoring (PTE-style)**: `Leo score this essay: <essay text>` scores a
+  student's writing against the real PTE "Write Essay" rubric and sends back
+  a full breakdown — but only inside a WhatsApp group the developer has
+  explicitly marked a "class group" on the dashboard (Admin tab → "Class
+  groups" card, `app/leo-ui/src/components/ClassGroupsPanel.tsx`), with an
+  optional class name and subject attached to it. It's an explicit command,
+  not something that fires on its own just because a message looks
+  essay-length — a DM, or a group that hasn't been marked a class group,
+  gets told plainly that essay scoring isn't available there, rather than
+  being ignored or answered as normal chat. Because the trigger only fires
+  on a message that actually came from inside that group, and WhatsApp
+  itself guarantees whoever sent it is a real member of it, "this message
+  came from a marked class group" is already enough to know "this is a
+  student in that class" — no separate roster check needed.
+  - **Three ways to submit**: inline (`Leo score this essay: <text>`), as
+    the caption on a photo of a handwritten essay, or as a reply to an
+    essay someone (the student or anyone else) already sent or pasted
+    earlier in the chat — LEO resolves the quoted message the same way it
+    already does for "what does this say?" on a replied-to photo/document.
+  - **Handwritten photos**: when the essay is a photo instead of typed
+    text, the bridge sends it to a dedicated `transcribeHandwriting()` call
+    in `llmRouter.ts` (Gemini, multimodal input, same model-fallback
+    machinery as everything else) that transcribes it exactly as written
+    before scoring runs — the same underlying vision capability already
+    used for documents/images, just its own call rather than going through
+    the general chat path.
+  - **Unknown senders get asked for a name first**: if the number
+    submitting hasn't ever introduced itself (per the "I'm \<name\>"
+    contact-memory feature above), LEO asks for their name once before
+    scoring anything, so the feedback and the stored submission can be
+    tied to an actual name instead of a bare phone number.
+  - **Scoring call**: the rubric itself is the real PTE "Write Essay"
+    rubric, ported directly from SmartLabs' own live website
+    (`DARK-V-98/smartlabs`'s
+    `src/ai/flows/score-pte-writing-write-essay.ts`) — Content (0-3),
+    Form/word-count (0-2), Development/Structure/Coherence (0-2), Grammar
+    (0-2), Vocabulary (0-2), and Spelling (0-2), summed to an overall score
+    out of 13. The bridge doesn't score anything itself; it calls a new
+    `/api/essay-score` route on the dashboard's Next.js app, which calls a
+    new `scoreEssay()` function in `app/leo-ui/src/lib/llmRouter.ts` — Gemini
+    with a structured JSON response schema, going through the same
+    call-budget/model-fallback machinery every other Gemini call in this
+    system already uses.
+  - **Feedback stays private**: the full score breakdown and written
+    feedback are DMed to the student directly — never posted in the group.
+    The group itself only sees a short, generic acknowledgement (something
+    like "Scored — sent Nimali the feedback") with no score and no essay
+    content in it, since a class group is still a shared chat other
+    students read.
+  - **What gets stored**: every scored submission is written to a new
+    `essaySubmissions` Firestore collection — student JID and name, group
+    JID, the essay text, `source: "text"` or `"photo"`, the six category
+    scores plus the overall, the feedback text, and a timestamp — via the
+    bridge's Admin SDK, developer-read-only per `firestore.rules` (already
+    updated), same as `whatsappChats`. The rubric itself lives in its own
+    `scoringRubrics` collection (one document, seeded by a one-off script)
+    rather than being hardcoded, so swapping in an updated rubric later is
+    a data change in Firestore, not a code change here.
 - **Reminders**: `remind me in 20 minutes to call the vendor` or
   `remind me tomorrow at 9am to send the SEO report` — LEO replies
   confirming the time, then DMs you back at that time. If no time is

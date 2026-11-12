@@ -26,6 +26,7 @@ import { subscribeLmsStatus, requestLmsCheck, LmsStatus } from "@/lib/lmsStatus"
 import { firebaseEnabled } from "@/lib/firebase";
 import WhatsAppChatsPanel from "./WhatsAppChatsPanel";
 import WhatsAppAdminsPanel from "./WhatsAppAdminsPanel";
+import ClassGroupsPanel from "./ClassGroupsPanel";
 
 type ProviderStatus = { ok: boolean; message: string; detail?: string };
 type ProviderStatusResponse = {
@@ -407,6 +408,8 @@ export default function AdminPanel() {
       </div>
 
       <WhatsAppAdminsPanel />
+
+      <ClassGroupsPanel />
 
       <div className="min-h-[320px] flex-1">
         <WhatsAppChatsPanel />
