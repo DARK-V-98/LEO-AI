@@ -229,12 +229,44 @@ export async function reviseDocument(
   );
 }
 
-// --- Essay scoring (PTE-style) -------------------------------------------
-// The exact rubric and prompting approach already live and in production
+// --- Writing-rubric scoring (PTE-style) -----------------------------------
+// The exact rubrics and prompting approach already live and in production
 // on the SmartLabs website's own AI trainer (DARK-V-98/smartlabs,
-// src/ai/flows/score-pte-writing-write-essay.ts) — ported here as-is
-// rather than inventing a new one, so LEO scores an essay exactly the way
-// that site already does.
+// src/ai/flows/score-pte-writing-*.ts and pte-writing.types.ts) — ported
+// here as-is rather than inventing new ones, so LEO scores writing tasks
+// exactly the way that site already does. scoreWriting() is the general
+// engine; scoreEssay() is kept as a thin wrapper around it with the
+// Write Essay rubric baked in, so its exported signature/behavior never
+// changes for whatever else already depends on it.
+export type RubricCriterion = { key: string; label: string; max: number };
+export type Rubric = { id: string; name: string; maxScore: number; criteria: RubricCriterion[] };
+
+export const PTE_WRITE_ESSAY_RUBRIC: Rubric = {
+  id: "pte-write-essay",
+  name: "PTE Academic Writing — Write Essay",
+  maxScore: 13,
+  criteria: [
+    { key: "contentScore", label: "Content", max: 3 },
+    { key: "formScore", label: "Form (200-300 words)", max: 2 },
+    { key: "structureScore", label: "Development, Structure & Coherence", max: 2 },
+    { key: "grammarScore", label: "Grammar", max: 2 },
+    { key: "vocabularyScore", label: "Vocabulary", max: 2 },
+    { key: "spellingScore", label: "Spelling", max: 2 },
+  ],
+};
+
+export const PTE_SUMMARIZE_WRITTEN_TEXT_RUBRIC: Rubric = {
+  id: "pte-summarize-written-text",
+  name: "PTE Academic Writing — Summarize Written Text",
+  maxScore: 7,
+  criteria: [
+    { key: "contentScore", label: "Content (covering the main points)", max: 2 },
+    { key: "formScore", label: "Form (a single sentence, 5-75 words)", max: 1 },
+    { key: "grammarScore", label: "Grammar", max: 2 },
+    { key: "vocabularyScore", label: "Vocabulary", max: 2 },
+  ],
+};
+
 export type EssayScore = {
   contentScore: number;
   formScore: number;
@@ -246,85 +278,85 @@ export type EssayScore = {
   feedback: string;
 };
 
-const ESSAY_SCORING_SYSTEM_PROMPT =
-  'You are an expert PTE examiner AI. Your task is to score a "Write Essay" task.\n\n' +
-  "Evaluate the essay based on the following criteria:\n" +
-  "1. Content (0-3 points): Does the essay address all aspects of the topic with relevant ideas and examples?\n" +
-  "2. Form (0-2 points): Is the word count between 200 and 300 words? (2 for in range, 1 for close, 0 for far off).\n" +
-  "3. Development, Structure and Coherence (0-2 points): Is the essay well-organized with a clear introduction, body paragraphs, and conclusion?\n" +
-  "4. Grammar (0-2 points): Is the grammar correct and varied?\n" +
-  "5. Vocabulary (0-2 points): Is the vocabulary range good and used appropriately?\n" +
-  "6. Spelling (0-2 points): Is the spelling correct?\n\n" +
-  "Calculate the score for each criterion, then sum them for 'overallScore' (0-13). " +
-  "Provide specific, constructive feedback in the 'feedback' field explaining the scores for " +
-  "each category and giving concrete, actionable suggestions for improvement — not a vague " +
-  "overall impression. If no topic was given, infer the likely topic from the essay itself " +
-  "and score it on that basis rather than refusing. Respond with exactly the JSON fields " +
-  "requested, nothing else.";
+export type WritingScore = Record<string, number> & { overallScore: number; feedback: string };
 
-const ESSAY_SCORE_SCHEMA = {
-  type: "OBJECT",
-  properties: {
-    contentScore: { type: "NUMBER" },
-    formScore: { type: "NUMBER" },
-    structureScore: { type: "NUMBER" },
-    grammarScore: { type: "NUMBER" },
-    vocabularyScore: { type: "NUMBER" },
-    spellingScore: { type: "NUMBER" },
-    overallScore: { type: "NUMBER" },
-    feedback: { type: "STRING" },
-  },
-  required: [
-    "contentScore",
-    "formScore",
-    "structureScore",
-    "grammarScore",
-    "vocabularyScore",
-    "spellingScore",
-    "overallScore",
-    "feedback",
-  ],
-};
+/** Builds the system prompt for a given rubric, dynamically listing its
+ * criteria and the exact JSON field names the model must use — same
+ * tone/instructions as the original hardcoded Write Essay prompt. */
+function writingSystemPrompt(rubric: Rubric): string {
+  const criteriaLines = rubric.criteria
+    .map((c, i) => `${i + 1}. ${c.label} (0-${c.max} points)`)
+    .join("\n");
+  const fieldNames = rubric.criteria.map((c) => c.key).join(", ");
+  return (
+    `You are an expert PTE examiner AI. Your task is to score a "${rubric.name}" task.\n\n` +
+    "Evaluate the response based on the following criteria:\n" +
+    `${criteriaLines}\n\n` +
+    `Use exactly these JSON field names for the criteria scores: ${fieldNames}. ` +
+    `Calculate the score for each criterion, then sum them for 'overallScore' (0-${rubric.maxScore}). ` +
+    "Provide specific, constructive feedback in the 'feedback' field explaining the scores for " +
+    "each category and giving concrete, actionable suggestions for improvement — not a vague " +
+    "overall impression. If no topic was given, infer the likely topic from the essay itself " +
+    "and score it on that basis rather than refusing. Respond with exactly the JSON fields " +
+    "requested, nothing else."
+  );
+}
 
-// Clamps each score to its real PTE range rather than trusting the model's
-// arithmetic blindly — a cheap sanity check before this goes out as an
-// actual grade.
-function clampEssayScore(raw: Record<string, unknown>): EssayScore {
-  const num = (v: unknown, max: number) =>
-    Math.max(0, Math.min(max, Math.round(Number(v) || 0)));
-  const contentScore = num(raw.contentScore, 3);
-  const formScore = num(raw.formScore, 2);
-  const structureScore = num(raw.structureScore, 2);
-  const grammarScore = num(raw.grammarScore, 2);
-  const vocabularyScore = num(raw.vocabularyScore, 2);
-  const spellingScore = num(raw.spellingScore, 2);
+/** Builds the JSON response schema for a given rubric: one NUMBER property
+ * per criterion key, plus overallScore and feedback, all required. */
+function writingScoreSchema(rubric: Rubric) {
+  const properties: Record<string, { type: string }> = {};
+  for (const c of rubric.criteria) properties[c.key] = { type: "NUMBER" };
+  properties.overallScore = { type: "NUMBER" };
+  properties.feedback = { type: "STRING" };
   return {
-    contentScore,
-    formScore,
-    structureScore,
-    grammarScore,
-    vocabularyScore,
-    spellingScore,
-    overallScore: contentScore + formScore + structureScore + grammarScore + vocabularyScore + spellingScore,
-    feedback: typeof raw.feedback === "string" && raw.feedback.trim() ? raw.feedback.trim() : "No feedback returned.",
+    type: "OBJECT",
+    properties,
+    required: [...rubric.criteria.map((c) => c.key), "overallScore", "feedback"],
   };
 }
 
-/** Scores an essay the same way the SmartLabs website's PTE Write Essay
- * trainer does — same rubric, same six criteria, same 0-13 total. Returns
- * null on any failure (no key, no budget, every model unreachable) rather
- * than a wrong/guessed score. */
-export async function scoreEssay(essay: string, topic?: string): Promise<EssayScore | null> {
+// Clamps each criterion score to its real range rather than trusting the
+// model's arithmetic blindly, and recomputes overallScore as the sum of
+// the clamped scores — a cheap sanity check before this goes out as an
+// actual grade.
+function clampWritingScore(rubric: Rubric, raw: Record<string, unknown>): WritingScore {
+  const num = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(v) || 0)));
+  const result: Record<string, number> = {};
+  let overallScore = 0;
+  for (const c of rubric.criteria) {
+    const score = num(raw[c.key], c.max);
+    result[c.key] = score;
+    overallScore += score;
+  }
+  return {
+    ...result,
+    overallScore,
+    feedback:
+      typeof raw.feedback === "string" && raw.feedback.trim() ? raw.feedback.trim() : "No feedback returned.",
+  } as WritingScore;
+}
+
+const WRITING_SCORE_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"];
+
+/** General writing-rubric scoring engine: builds the system prompt and
+ * JSON schema dynamically from the given rubric, loops the same model
+ * fallback list and budget checks used everywhere else, and clamps the
+ * result defensively. Returns null on any failure (no key, no budget,
+ * every model unreachable) rather than a wrong/guessed score. */
+export async function scoreWriting(text: string, rubric: Rubric, topic?: string): Promise<WritingScore | null> {
   const key = process.env.GEMINI_API_KEY;
-  if (!key || !essay.trim()) return null;
+  if (!key || !text.trim()) return null;
 
   const prompt =
     `The user was given the following topic:\n---\nTOPIC: ${
       topic?.trim() || "(not specified — infer the likely topic from the essay itself)"
-    }\n---\n\n` + `The user wrote the following essay:\n---\nESSAY: ${essay.trim()}\n---\n\nEvaluate it now.`;
+    }\n---\n\n` + `The user wrote the following response:\n---\nTEXT: ${text.trim()}\n---\n\nEvaluate it now.`;
 
-  const ESSAY_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"];
-  for (const model of ESSAY_MODELS) {
+  const systemPrompt = writingSystemPrompt(rubric);
+  const schema = writingScoreSchema(rubric);
+
+  for (const model of WRITING_SCORE_MODELS) {
     if (!withinGeminiBudget()) return null;
     try {
       recordGeminiCall();
@@ -335,24 +367,44 @@ export async function scoreEssay(essay: string, topic?: string): Promise<EssaySc
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ role: "user", parts: [{ text: prompt }] }],
-            systemInstruction: { parts: [{ text: ESSAY_SCORING_SYSTEM_PROMPT }] },
-            generationConfig: { responseMimeType: "application/json", responseSchema: ESSAY_SCORE_SCHEMA },
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            generationConfig: { responseMimeType: "application/json", responseSchema: schema },
           }),
         }
       );
       if (!res.ok) continue;
       const data = await res.json();
-      const text = data?.candidates?.[0]?.content?.parts?.find(
+      const responseText = data?.candidates?.[0]?.content?.parts?.find(
         (p: { text?: string }) => typeof p.text === "string"
       )?.text;
-      if (!text) continue;
-      const parsed = JSON.parse(text);
-      return clampEssayScore(parsed);
+      if (!responseText) continue;
+      const parsed = JSON.parse(responseText);
+      return clampWritingScore(rubric, parsed);
     } catch {
       continue;
     }
   }
   return null;
+}
+
+/** Scores an essay the same way the SmartLabs website's PTE Write Essay
+ * trainer does — same rubric, same six criteria, same 0-13 total. Returns
+ * null on any failure (no key, no budget, every model unreachable) rather
+ * than a wrong/guessed score. Thin wrapper around scoreWriting() with the
+ * Write Essay rubric baked in — behavior/signature unchanged. */
+export async function scoreEssay(essay: string, topic?: string): Promise<EssayScore | null> {
+  const result = await scoreWriting(essay, PTE_WRITE_ESSAY_RUBRIC, topic);
+  if (!result) return null;
+  return {
+    contentScore: result.contentScore,
+    formScore: result.formScore,
+    structureScore: result.structureScore,
+    grammarScore: result.grammarScore,
+    vocabularyScore: result.vocabularyScore,
+    spellingScore: result.spellingScore,
+    overallScore: result.overallScore,
+    feedback: result.feedback,
+  };
 }
 
 const HANDWRITING_TRANSCRIBE_PROMPT =
@@ -400,6 +452,283 @@ export async function transcribeHandwriting(imageBase64: string, mimeType: strin
         (p: { text?: string }) => typeof p.text === "string"
       )?.text;
       if (text?.trim()) return text.trim();
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+// --- Speaking scoring (PTE-style) -----------------------------------------
+// Same seven speaking tasks, ported exactly (prompts included) from the
+// SmartLabs website's own AI trainer (DARK-V-98/smartlabs,
+// src/ai/flows/score-pte-speaking-*.ts) rather than paraphrased.
+export type SpeakingTaskType =
+  | "read_aloud"
+  | "repeat_sentence"
+  | "describe_image"
+  | "retell_lecture"
+  | "answer_short_question"
+  | "respond_to_situation"
+  | "summarize_group_discussion";
+
+export type SpeakingScoreInput = {
+  taskType: SpeakingTaskType;
+  audioBase64: string;
+  audioMimeType: string;
+  // The text/transcript/sentence/situation/discussion/question, depending
+  // on taskType — see the per-task prompt builders below for which.
+  referenceText?: string;
+  // answer_short_question only.
+  expectedAnswer?: string;
+  // describe_image only.
+  imageBase64?: string;
+  imageMimeType?: string;
+};
+
+export type SpeakingScoreResult = {
+  transcript: string;
+  contentScore?: number; // absent for answer_short_question
+  isCorrect?: boolean; // answer_short_question only
+  pronunciationScore: number;
+  fluencyScore: number;
+  overallScore: number;
+  feedback: string;
+};
+
+const READ_ALOUD_PROMPT = (text: string) =>
+  'You are an expert PTE examiner AI. Your task is to score a "Read Aloud" speaking task.\n\n' +
+  "The user was given the following text to read:\n---\n" +
+  `ORIGINAL TEXT: ${text}\n---\n\n` +
+  "You have been provided with an audio recording of the user reading this text. Your task is to:\n" +
+  "1. Transcribe the user's speech accurately into the 'transcript' field.\n" +
+  "2. Compare the 'transcript' to the 'ORIGINAL TEXT'. Calculate a 'contentScore' out of 90 based on the percentage of words that were correctly read, inserted, or omitted.\n" +
+  "3. Evaluate the user's speech for clarity, phoneme accuracy, and stress/intonation. Provide a 'pronunciationScore' out of 90, where 90 is native-like.\n" +
+  "4. Evaluate the user's rhythm, pace, and phrasing. There should be no unnatural hesitations. Provide a 'fluencyScore' out of 90, where 90 is native-like.\n" +
+  "5. Calculate an 'overallScore' which is the average of the content, pronunciation, and fluency scores.\n" +
+  "6. Provide specific, constructive 'feedback' explaining the scores. Pinpoint specific words that were mispronounced or where fluency was lost.";
+
+const REPEAT_SENTENCE_PROMPT = (originalSentence: string) =>
+  'You are an expert PTE examiner AI. Your task is to score a "Repeat Sentence" speaking task.\n\n' +
+  "The user was asked to repeat the following sentence:\n---\n" +
+  `ORIGINAL SENTENCE: ${originalSentence}\n---\n\n` +
+  "You have been provided with an audio recording of the user repeating this sentence. Your task is to:\n" +
+  "1. Transcribe the user's speech accurately into the 'transcript' field.\n" +
+  "2. Compare the 'transcript' to the 'ORIGINAL SENTENCE'. Calculate a 'contentScore' out of 90 based on the percentage of words that were correctly repeated.\n" +
+  "3. Evaluate the user's speech for clarity and phoneme accuracy. Provide a 'pronunciationScore' out of 90.\n" +
+  "4. Evaluate the user's rhythm and pace. There should be no unnatural hesitations. Provide a 'fluencyScore' out of 90.\n" +
+  "5. Calculate an 'overallScore' which is the average of the content, pronunciation, and fluency scores.\n" +
+  "6. Provide specific, constructive 'feedback' explaining the scores. Pinpoint specific words that were mispronounced or where fluency was lost.";
+
+const DESCRIBE_IMAGE_PROMPT =
+  'You are an expert PTE examiner AI. Your task is to score a "Describe Image" speaking task.\n\n' +
+  "You have been provided with the image the user was asked to describe, and an audio recording of the user describing it. Your task is to:\n" +
+  "1. Transcribe the user's speech accurately into the 'transcript' field.\n" +
+  "2. Evaluate the transcript to determine how well the user described the main elements of the image, their relationships, possible developments, and conclusions. Calculate a 'contentScore' out of 90 based on the relevance, accuracy, and completeness of the description.\n" +
+  "3. Evaluate the user's pronunciation for clarity and native-like quality. Provide a 'pronunciationScore' out of 90.\n" +
+  "4. Evaluate the user's fluency, rhythm, and pace. Speech should be smooth with minimal hesitation. Provide a 'fluencyScore' out of 90.\n" +
+  "5. Calculate an 'overallScore' which is the average of the content, pronunciation, and fluency scores.\n" +
+  "6. Provide specific, constructive 'feedback' on the content of the description, as well as on pronunciation and fluency.";
+
+const RETELL_LECTURE_PROMPT = (lectureTranscript: string) =>
+  'You are an expert PTE examiner AI. Your task is to score a "Retell Lecture" speaking task.\n\n' +
+  "The user listened to a lecture with the following content:\n---\n" +
+  `LECTURE TRANSCRIPT: ${lectureTranscript}\n---\n\n` +
+  "You have been provided with an audio recording of the user retelling the main points of the lecture. Your task is to:\n" +
+  "1. Transcribe the user's speech accurately into the 'transcript' field.\n" +
+  "2. Evaluate the transcript to determine how well the user retold the main points and conclusion of the lecture. The retelling should be accurate and include key information. Calculate a 'contentScore' out of 90.\n" +
+  "3. Evaluate the user's pronunciation for clarity and native-like quality. Provide a 'pronunciationScore' out of 90.\n" +
+  "4. Evaluate the user's fluency, rhythm, and pace. Provide a 'fluencyScore' out of 90.\n" +
+  "5. Calculate an 'overallScore' which is the average of the content, pronunciation, and fluency scores.\n" +
+  "6. Provide specific, constructive 'feedback' on how well they covered the lecture content, and on their pronunciation and fluency.";
+
+const ANSWER_SHORT_QUESTION_PROMPT = (questionAudioTranscript: string, expectedAnswer: string) =>
+  'You are an expert PTE examiner AI. Your task is to score an "Answer Short Question" speaking task.\n\n' +
+  "The user was asked the following question:\n" +
+  `QUESTION: ${questionAudioTranscript}\n\n` +
+  "The expected simple answer is:\n" +
+  `EXPECTED ANSWER: ${expectedAnswer}\n\n` +
+  "You have been provided with an audio recording of the user's answer. Your task is to:\n" +
+  "1. Transcribe the user's speech accurately into the 'transcript' field.\n" +
+  "2. Evaluate if the user's answer is correct based on the 'EXPECTED ANSWER'. The user's answer might be a single word or a short phrase. Set 'isCorrect' to true or false.\n" +
+  "3. Provide 'feedback' explaining why the answer is correct or incorrect, and add brief notes on pronunciation or fluency if needed.\n" +
+  "4. Evaluate the user's 'pronunciationScore' and 'fluencyScore' out of 90.\n" +
+  "5. Calculate an 'overallScore'. For this task, the content score is 90 if the answer is correct, and 10 if it's incorrect. The overall score is the average of this content score, the pronunciation score, and the fluency score.";
+
+const RESPOND_TO_SITUATION_PROMPT = (situationTranscript: string) =>
+  'You are an expert PTE examiner AI. Your task is to score a "Respond to a Situation" speaking task.\n\n' +
+  "The user was presented with the following situation:\n---\n" +
+  `SITUATION: ${situationTranscript}\n---\n\n` +
+  "You have been provided with an audio recording of the user's response. Your task is to:\n" +
+  "1. Transcribe the user's speech accurately into the 'transcript' field.\n" +
+  "2. Evaluate the transcript to determine how appropriately and completely the user responded to the situation. Calculate a 'contentScore' out of 90.\n" +
+  "3. Evaluate the user's pronunciation for clarity and native-like quality. Provide a 'pronunciationScore' out of 90.\n" +
+  "4. Evaluate the user's fluency, rhythm, and pace. Speech should be smooth with minimal hesitation. Provide a 'fluencyScore' out of 90.\n" +
+  "5. Calculate an 'overallScore' which is the average of the content, pronunciation, and fluency scores.\n" +
+  "6. Provide specific, constructive 'feedback' on the content of the response, as well as on pronunciation and fluency.";
+
+const SUMMARIZE_GROUP_DISCUSSION_PROMPT = (discussionTranscript: string) =>
+  'You are an expert PTE examiner AI. Your task is to score a "Summarize Group Discussion" speaking task.\n\n' +
+  "The user listened to a group discussion with the following content:\n---\n" +
+  `DISCUSSION TRANSCRIPT: ${discussionTranscript}\n---\n\n` +
+  "You have been provided with an audio recording of the user summarizing the discussion. Your task is to:\n" +
+  "1. Transcribe the user's speech accurately into the 'transcript' field.\n" +
+  "2. Evaluate the transcript to determine how well the user summarized the main points and conclusion of the discussion. Calculate a 'contentScore' out of 90.\n" +
+  "3. Evaluate the user's pronunciation for clarity and native-like quality. Provide a 'pronunciationScore' out of 90.\n" +
+  "4. Evaluate the user's fluency, rhythm, and pace. Provide a 'fluencyScore' out of 90.\n" +
+  "5. Calculate an 'overallScore' which is the average of the content, pronunciation, and fluency scores.\n" +
+  "6. Provide specific, constructive 'feedback' on how well they covered the discussion content, and on their pronunciation and fluency.";
+
+const SPEAKING_SCORE_SCHEMA_WITH_CONTENT = {
+  type: "OBJECT",
+  properties: {
+    transcript: { type: "STRING" },
+    contentScore: { type: "NUMBER" },
+    pronunciationScore: { type: "NUMBER" },
+    fluencyScore: { type: "NUMBER" },
+    overallScore: { type: "NUMBER" },
+    feedback: { type: "STRING" },
+  },
+  required: ["transcript", "contentScore", "pronunciationScore", "fluencyScore", "overallScore", "feedback"],
+};
+
+const SPEAKING_SCORE_SCHEMA_IS_CORRECT = {
+  type: "OBJECT",
+  properties: {
+    transcript: { type: "STRING" },
+    isCorrect: { type: "BOOLEAN" },
+    pronunciationScore: { type: "NUMBER" },
+    fluencyScore: { type: "NUMBER" },
+    overallScore: { type: "NUMBER" },
+    feedback: { type: "STRING" },
+  },
+  required: ["transcript", "isCorrect", "pronunciationScore", "fluencyScore", "overallScore", "feedback"],
+};
+
+type SpeakingPromptAndSchema = {
+  prompt: string;
+  schema: typeof SPEAKING_SCORE_SCHEMA_WITH_CONTENT | typeof SPEAKING_SCORE_SCHEMA_IS_CORRECT;
+};
+
+/** Looks up the right verbatim prompt + JSON schema for a speaking task,
+ * from the input's taskType and its task-specific fields. Returns null
+ * when a required field for that task type is missing. */
+function buildSpeakingPromptAndSchema(input: SpeakingScoreInput): SpeakingPromptAndSchema | null {
+  switch (input.taskType) {
+    case "read_aloud":
+      if (!input.referenceText?.trim()) return null;
+      return { prompt: READ_ALOUD_PROMPT(input.referenceText.trim()), schema: SPEAKING_SCORE_SCHEMA_WITH_CONTENT };
+    case "repeat_sentence":
+      if (!input.referenceText?.trim()) return null;
+      return {
+        prompt: REPEAT_SENTENCE_PROMPT(input.referenceText.trim()),
+        schema: SPEAKING_SCORE_SCHEMA_WITH_CONTENT,
+      };
+    case "describe_image":
+      return { prompt: DESCRIBE_IMAGE_PROMPT, schema: SPEAKING_SCORE_SCHEMA_WITH_CONTENT };
+    case "retell_lecture":
+      if (!input.referenceText?.trim()) return null;
+      return {
+        prompt: RETELL_LECTURE_PROMPT(input.referenceText.trim()),
+        schema: SPEAKING_SCORE_SCHEMA_WITH_CONTENT,
+      };
+    case "answer_short_question":
+      if (!input.referenceText?.trim() || !input.expectedAnswer?.trim()) return null;
+      return {
+        prompt: ANSWER_SHORT_QUESTION_PROMPT(input.referenceText.trim(), input.expectedAnswer.trim()),
+        schema: SPEAKING_SCORE_SCHEMA_IS_CORRECT,
+      };
+    case "respond_to_situation":
+      if (!input.referenceText?.trim()) return null;
+      return {
+        prompt: RESPOND_TO_SITUATION_PROMPT(input.referenceText.trim()),
+        schema: SPEAKING_SCORE_SCHEMA_WITH_CONTENT,
+      };
+    case "summarize_group_discussion":
+      if (!input.referenceText?.trim()) return null;
+      return {
+        prompt: SUMMARIZE_GROUP_DISCUSSION_PROMPT(input.referenceText.trim()),
+        schema: SPEAKING_SCORE_SCHEMA_WITH_CONTENT,
+      };
+    default:
+      return null;
+  }
+}
+
+const SPEAKING_SCORE_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"];
+
+// Clamps the 0-90 sub-scores defensively and recomputes overallScore as the
+// average of whichever three values apply for this task type, rather than
+// trusting the model's own arithmetic.
+function clampSpeakingScore(raw: Record<string, unknown>, hasContentScore: boolean): SpeakingScoreResult {
+  const num90 = (v: unknown) => Math.max(0, Math.min(90, Math.round(Number(v) || 0)));
+  const pronunciationScore = num90(raw.pronunciationScore);
+  const fluencyScore = num90(raw.fluencyScore);
+  const transcript = typeof raw.transcript === "string" ? raw.transcript.trim() : "";
+  const feedback =
+    typeof raw.feedback === "string" && raw.feedback.trim() ? raw.feedback.trim() : "No feedback returned.";
+
+  if (hasContentScore) {
+    const contentScore = num90(raw.contentScore);
+    const overallScore = Math.round((contentScore + pronunciationScore + fluencyScore) / 3);
+    return { transcript, contentScore, pronunciationScore, fluencyScore, overallScore, feedback };
+  }
+
+  const isCorrect = Boolean(raw.isCorrect);
+  const impliedContentScore = isCorrect ? 90 : 10;
+  const overallScore = Math.round((impliedContentScore + pronunciationScore + fluencyScore) / 3);
+  return { transcript, isCorrect, pronunciationScore, fluencyScore, overallScore, feedback };
+}
+
+/** Scores any of the 7 PTE speaking tasks, same way the SmartLabs website's
+ * AI trainer does for each (verbatim prompts, ported exactly). Sends the
+ * audio (and, for describe_image, the image) as inlineData parts alongside
+ * the task's text prompt, loops the same model fallback list and budget
+ * checks used everywhere else, and clamps the result defensively. Returns
+ * null on any failure — missing input, no key, no budget, every model
+ * unreachable, or an unparseable response — rather than a guessed score. */
+export async function scoreSpeaking(input: SpeakingScoreInput): Promise<SpeakingScoreResult | null> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || !input.audioBase64?.trim() || !input.audioMimeType?.trim()) return null;
+  if (input.taskType === "describe_image" && (!input.imageBase64?.trim() || !input.imageMimeType?.trim())) {
+    return null;
+  }
+
+  const built = buildSpeakingPromptAndSchema(input);
+  if (!built) return null;
+  const { prompt, schema } = built;
+  const hasContentScore = schema === SPEAKING_SCORE_SCHEMA_WITH_CONTENT;
+
+  const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
+  if (input.taskType === "describe_image") {
+    parts.push({ inlineData: { mimeType: input.imageMimeType!, data: input.imageBase64! } });
+  }
+  parts.push({ inlineData: { mimeType: input.audioMimeType, data: input.audioBase64 } });
+  parts.push({ text: prompt });
+
+  for (const model of SPEAKING_SCORE_MODELS) {
+    if (!withinGeminiBudget()) return null;
+    try {
+      recordGeminiCall();
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts }],
+            generationConfig: { responseMimeType: "application/json", responseSchema: schema },
+          }),
+        }
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.find(
+        (p: { text?: string }) => typeof p.text === "string"
+      )?.text;
+      if (!text) continue;
+      const parsed = JSON.parse(text);
+      return clampSpeakingScore(parsed, hasContentScore);
     } catch {
       continue;
     }
