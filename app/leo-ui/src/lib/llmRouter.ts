@@ -230,30 +230,60 @@ export async function reviseDocument(
 }
 
 // --- Writing-rubric scoring (PTE-style) -----------------------------------
-// The exact rubrics and prompting approach already live and in production
-// on the SmartLabs website's own AI trainer (DARK-V-98/smartlabs,
-// src/ai/flows/score-pte-writing-*.ts and pte-writing.types.ts) — ported
-// here as-is rather than inventing new ones, so LEO scores writing tasks
-// exactly the way that site already does. scoreWriting() is the general
-// engine; scoreEssay() is kept as a thin wrapper around it with the
-// Write Essay rubric baked in, so its exported signature/behavior never
-// changes for whatever else already depends on it.
+// The Write Essay rubric here is reverse-engineered from a real scored
+// report the SmartLabs website actually produced (an "Essay Evaluation
+// Report" PDF, seen 2026-11), NOT from source code — the live site's
+// current essay-scoring engine is newer/richer than the one in the
+// DARK-V-98/smartlabs GitHub repo (which only has the older 6-criterion,
+// sum-to-13 rubric; that's what LEO originally shipped with, and it's
+// why LEO's scores didn't match the website's). The real report shows 7
+// criteria summing to a 26-point raw total, then scaled to a 0-90
+// display score — confirmed by reproducing the exact arithmetic from a
+// real example (criteria summing to 18/26, displayed as "62/90":
+// round(18/26*90) = 62, matching exactly). scoreWriting() is the general
+// engine; scoreEssay() is a wrapper around it with the Write Essay
+// rubric baked in, plus the raw->90 scaling and a qualitative band the
+// website also shows (e.g. "Intermediate").
 export type RubricCriterion = { key: string; label: string; max: number };
 export type Rubric = { id: string; name: string; maxScore: number; criteria: RubricCriterion[] };
 
 export const PTE_WRITE_ESSAY_RUBRIC: Rubric = {
   id: "pte-write-essay",
   name: "PTE Academic Writing — Write Essay",
-  maxScore: 13,
+  maxScore: 26,
   criteria: [
-    { key: "contentScore", label: "Content", max: 3 },
-    { key: "formScore", label: "Form (200-300 words)", max: 2 },
-    { key: "structureScore", label: "Development, Structure & Coherence", max: 2 },
-    { key: "grammarScore", label: "Grammar", max: 2 },
+    { key: "contentScore", label: "Content", max: 6 },
+    { key: "formScore", label: "Form (200-300 words, strict 4-paragraph structure)", max: 2 },
+    { key: "structureScore", label: "Development, Structure & Coherence", max: 6 },
+    { key: "linguisticRangeScore", label: "General Linguistic Range", max: 6 },
     { key: "vocabularyScore", label: "Vocabulary", max: 2 },
+    { key: "grammarScore", label: "Grammar", max: 2 },
     { key: "spellingScore", label: "Spelling", max: 2 },
   ],
 };
+
+// Strictness notes matching the real report's observed behavior — a
+// generic rubric-criteria list alone scores noticeably more leniently
+// than the real site does (confirmed: the same essay that scored 62/90
+// on the website scored well above that through the plain rubric
+// prompt). These call out the exact things the real report penalized.
+const WRITE_ESSAY_SCORING_NOTES =
+  "Score strictly, the way a real PTE Academic examiner would — not generously. Specifically:\n" +
+  "- Form: the required structure is exactly 4 paragraphs (introduction, two body paragraphs, " +
+  "conclusion). A 3-paragraph or 5-or-more-paragraph essay loses Form points even if the word " +
+  "count is in range — say exactly how many paragraphs it has and that this is why Form was marked down.\n" +
+  "- Vocabulary: if a word or phrase from the prompt (or any other word) is repeated many times " +
+  "instead of being varied, this is a real weakness — name the repeated word and roughly how many " +
+  "times it appears, and mark Vocabulary down for it.\n" +
+  "- General Linguistic Range: reward compound-complex sentences, relative clauses, and varied " +
+  "structures; mark down an essay that's mostly short, simple sentences joined by basic conjunctions.\n" +
+  "- Development, Structure & Coherence: mark down a paragraph that drifts off its own topic " +
+  "sentence partway through, an underdeveloped or oddly isolated counter-argument paragraph, or a " +
+  "conclusion that introduces a new point never mentioned in the introduction's thesis.\n" +
+  "- Content: a generic, unsupported example (no concrete named place, case, or data) should score " +
+  "lower than a specific, well-evidenced one, even when the overall argument/position is clear.\n" +
+  "Be specific in the feedback — name the actual repeated words, the actual paragraph count, the " +
+  "actual structural issue found — never a vague overall impression.";
 
 export const PTE_SUMMARIZE_WRITTEN_TEXT_RUBRIC: Rubric = {
   id: "pte-summarize-written-text",
@@ -268,22 +298,38 @@ export const PTE_SUMMARIZE_WRITTEN_TEXT_RUBRIC: Rubric = {
 };
 
 export type EssayScore = {
-  contentScore: number;
-  formScore: number;
-  structureScore: number;
-  grammarScore: number;
-  vocabularyScore: number;
-  spellingScore: number;
-  overallScore: number;
+  contentScore: number; // 0-6
+  formScore: number; // 0-2
+  structureScore: number; // 0-6
+  linguisticRangeScore: number; // 0-6
+  vocabularyScore: number; // 0-2
+  grammarScore: number; // 0-2
+  spellingScore: number; // 0-2
+  rawScore: number; // sum of the above, 0-26
+  overallScore: number; // rawScore scaled to 0-90, matching the website's display score
+  band: string; // e.g. "Intermediate" — same qualitative label the website shows
   feedback: string;
 };
+
+/** Same qualitative bands the website's report shows (e.g. "Intermediate"
+ * at 62/90) — thresholds inferred from the one confirmed real example
+ * (62 = Intermediate, "not yet at 79+") since the exact cutoffs aren't
+ * otherwise available; worth tightening if a wider range of real
+ * examples becomes available later. */
+function pteWritingBand(score90: number): string {
+  if (score90 >= 79) return "Advanced";
+  if (score90 >= 65) return "Upper Intermediate";
+  if (score90 >= 50) return "Intermediate";
+  if (score90 >= 36) return "Pre-Intermediate";
+  return "Beginner";
+}
 
 export type WritingScore = Record<string, number> & { overallScore: number; feedback: string };
 
 /** Builds the system prompt for a given rubric, dynamically listing its
  * criteria and the exact JSON field names the model must use — same
  * tone/instructions as the original hardcoded Write Essay prompt. */
-function writingSystemPrompt(rubric: Rubric): string {
+function writingSystemPrompt(rubric: Rubric, extraNotes?: string): string {
   const criteriaLines = rubric.criteria
     .map((c, i) => `${i + 1}. ${c.label} (0-${c.max} points)`)
     .join("\n");
@@ -298,7 +344,8 @@ function writingSystemPrompt(rubric: Rubric): string {
     "each category and giving concrete, actionable suggestions for improvement — not a vague " +
     "overall impression. If no topic was given, infer the likely topic from the essay itself " +
     "and score it on that basis rather than refusing. Respond with exactly the JSON fields " +
-    "requested, nothing else."
+    "requested, nothing else." +
+    (extraNotes ? `\n\n${extraNotes}` : "")
   );
 }
 
@@ -344,7 +391,12 @@ const WRITING_SCORE_MODELS = ["gemini-3.5-flash-lite", "gemini-flash-latest", "g
  * fallback list and budget checks used everywhere else, and clamps the
  * result defensively. Returns null on any failure (no key, no budget,
  * every model unreachable) rather than a wrong/guessed score. */
-export async function scoreWriting(text: string, rubric: Rubric, topic?: string): Promise<WritingScore | null> {
+export async function scoreWriting(
+  text: string,
+  rubric: Rubric,
+  topic?: string,
+  extraNotes?: string
+): Promise<WritingScore | null> {
   const key = process.env.GEMINI_API_KEY;
   if (!key || !text.trim()) return null;
 
@@ -353,7 +405,7 @@ export async function scoreWriting(text: string, rubric: Rubric, topic?: string)
       topic?.trim() || "(not specified — infer the likely topic from the essay itself)"
     }\n---\n\n` + `The user wrote the following response:\n---\nTEXT: ${text.trim()}\n---\n\nEvaluate it now.`;
 
-  const systemPrompt = writingSystemPrompt(rubric);
+  const systemPrompt = writingSystemPrompt(rubric, extraNotes);
   const schema = writingScoreSchema(rubric);
 
   for (const model of WRITING_SCORE_MODELS) {
@@ -387,22 +439,28 @@ export async function scoreWriting(text: string, rubric: Rubric, topic?: string)
   return null;
 }
 
-/** Scores an essay the same way the SmartLabs website's PTE Write Essay
- * trainer does — same rubric, same six criteria, same 0-13 total. Returns
+/** Scores an essay the way the SmartLabs website's PTE Write Essay trainer
+ * actually does — 7 criteria summing to 26 raw points, scaled to a 0-90
+ * display score plus a qualitative band, matching a real scored report
+ * from that site (see the comment above PTE_WRITE_ESSAY_RUBRIC). Returns
  * null on any failure (no key, no budget, every model unreachable) rather
- * than a wrong/guessed score. Thin wrapper around scoreWriting() with the
- * Write Essay rubric baked in — behavior/signature unchanged. */
+ * than a wrong/guessed score. */
 export async function scoreEssay(essay: string, topic?: string): Promise<EssayScore | null> {
-  const result = await scoreWriting(essay, PTE_WRITE_ESSAY_RUBRIC, topic);
+  const result = await scoreWriting(essay, PTE_WRITE_ESSAY_RUBRIC, topic, WRITE_ESSAY_SCORING_NOTES);
   if (!result) return null;
+  const rawScore = result.overallScore;
+  const overallScore = Math.round((rawScore / PTE_WRITE_ESSAY_RUBRIC.maxScore) * 90);
   return {
     contentScore: result.contentScore,
     formScore: result.formScore,
     structureScore: result.structureScore,
-    grammarScore: result.grammarScore,
+    linguisticRangeScore: result.linguisticRangeScore,
     vocabularyScore: result.vocabularyScore,
+    grammarScore: result.grammarScore,
     spellingScore: result.spellingScore,
-    overallScore: result.overallScore,
+    rawScore,
+    overallScore,
+    band: pteWritingBand(overallScore),
     feedback: result.feedback,
   };
 }

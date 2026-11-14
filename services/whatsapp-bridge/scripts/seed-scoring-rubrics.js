@@ -44,15 +44,22 @@ const db = admin.firestore();
 // "...Score" suffix to match the real site's convention.
 const WRITING_RUBRICS = [
   {
+    // Reverse-engineered from a real scored report the website produced
+    // (not from the GitHub repo's source, which only has an older,
+    // 6-criterion/sum-to-13 version) — 7 criteria summing to 26 raw
+    // points, scaled to a 0-90 display score. See the matching comment
+    // in app/leo-ui/src/lib/llmRouter.ts for how the scaling was confirmed.
     id: "pte-write-essay",
     name: "PTE Academic Writing — Write Essay",
-    maxScore: 13,
+    maxScore: 26,
+    displayScale: 90,
     criteria: [
-      { key: "contentScore", label: "Content", max: 3 },
-      { key: "formScore", label: "Form (200-300 words)", max: 2 },
-      { key: "structureScore", label: "Development, Structure & Coherence", max: 2 },
-      { key: "grammarScore", label: "Grammar", max: 2 },
+      { key: "contentScore", label: "Content", max: 6 },
+      { key: "formScore", label: "Form (200-300 words, strict 4-paragraph structure)", max: 2 },
+      { key: "structureScore", label: "Development, Structure & Coherence", max: 6 },
+      { key: "linguisticRangeScore", label: "General Linguistic Range", max: 6 },
       { key: "vocabularyScore", label: "Vocabulary", max: 2 },
+      { key: "grammarScore", label: "Grammar", max: 2 },
       { key: "spellingScore", label: "Spelling", max: 2 },
     ],
   },

@@ -2480,21 +2480,25 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
                     contentScore: result.contentScore,
                     formScore: result.formScore,
                     structureScore: result.structureScore,
-                    grammarScore: result.grammarScore,
+                    linguisticRangeScore: result.linguisticRangeScore,
                     vocabularyScore: result.vocabularyScore,
+                    grammarScore: result.grammarScore,
                     spellingScore: result.spellingScore,
+                    rawScore: result.rawScore,
                     overallScore: result.overallScore,
+                    band: result.band,
                     feedback: result.feedback,
                     createdAt: Date.now(),
                   });
 
                   const dmText =
-                    `Essay score: ${result.overallScore}/13\n\n` +
-                    `Content: ${result.contentScore}/3\n` +
-                    `Form (word count): ${result.formScore}/2\n` +
-                    `Structure & coherence: ${result.structureScore}/2\n` +
-                    `Grammar: ${result.grammarScore}/2\n` +
+                    `Essay score: ${result.overallScore}/90 (${result.band})\n\n` +
+                    `Content: ${result.contentScore}/6\n` +
+                    `Form (word count + structure): ${result.formScore}/2\n` +
+                    `Development, Structure & Coherence: ${result.structureScore}/6\n` +
+                    `General Linguistic Range: ${result.linguisticRangeScore}/6\n` +
                     `Vocabulary: ${result.vocabularyScore}/2\n` +
+                    `Grammar: ${result.grammarScore}/2\n` +
                     `Spelling: ${result.spellingScore}/2\n\n` +
                     `${result.feedback}`;
                   await ensureHistoryLoaded(senderJid);
@@ -2509,7 +2513,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
                     .collection("activity")
                     .add({
                       title: "Scored an essay on WhatsApp",
-                      detail: `${person.name} — ${result.overallScore}/13`,
+                      detail: `${person.name} — ${result.overallScore}/90 (${result.band})`,
                       type: "ok",
                       createdAt: Date.now(),
                     })

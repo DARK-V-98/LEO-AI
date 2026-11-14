@@ -105,16 +105,24 @@ dates, not the AI — so these are fast and don't cost an AI call):
     contact-memory feature above), LEO asks for their name once before
     scoring anything, so the feedback and the stored submission can be
     tied to an actual name instead of a bare phone number.
-  - **Scoring call**: the rubric itself is the real PTE "Write Essay"
-    rubric, ported directly from SmartLabs' own live website
-    (`DARK-V-98/smartlabs`'s
-    `src/ai/flows/score-pte-writing-write-essay.ts`) — Content (0-3),
-    Form/word-count (0-2), Development/Structure/Coherence (0-2), Grammar
-    (0-2), Vocabulary (0-2), and Spelling (0-2), summed to an overall score
-    out of 13. The bridge doesn't score anything itself; it calls a new
-    `/api/essay-score` route on the dashboard's Next.js app, which calls a
-    new `scoreEssay()` function in `app/leo-ui/src/lib/llmRouter.ts` — Gemini
-    with a structured JSON response schema, going through the same
+  - **Scoring call**: the rubric matches the real PTE "Write Essay"
+    scoring the website's "Essay Evaluation Report" actually produces —
+    Content (0-6), Form/word-count+paragraph-structure (0-2),
+    Development/Structure/Coherence (0-6), General Linguistic Range (0-6),
+    Vocabulary (0-2), Grammar (0-2), and Spelling (0-2), summing to a
+    26-point raw total that's then scaled to a 0-90 display score plus a
+    qualitative band ("Intermediate", etc.) — same scale the website
+    shows. (The older 6-criterion/sum-to-13 rubric in the
+    `DARK-V-98/smartlabs` GitHub repo is out of date; this was
+    reverse-engineered from a real scored report instead, since that's
+    what the live site actually does now — see the comment above
+    `PTE_WRITE_ESSAY_RUBRIC` in `llmRouter.ts`.) The bridge doesn't score
+    anything itself; it calls a new `/api/essay-score` route on the
+    dashboard's Next.js app, which calls `scoreEssay()` in
+    `app/leo-ui/src/lib/llmRouter.ts` — Gemini with a structured JSON
+    response schema and explicit strictness notes (penalize a non-4-paragraph
+    structure, repeated keywords, generic examples — the specific things
+    the real report penalizes), going through the same
     call-budget/model-fallback machinery every other Gemini call in this
     system already uses.
   - **Feedback stays private**: the full score breakdown and written
