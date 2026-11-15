@@ -177,8 +177,28 @@ dates, not the AI — so these are fast and don't cost an AI call):
     (developer-read-only).
 - **Reminders**: `remind me in 20 minutes to call the vendor` or
   `remind me tomorrow at 9am to send the SEO report` — LEO replies
-  confirming the time, then DMs you back at that time. If no time is
-  understood, he'll ask for one instead of silently doing nothing.
+  confirming the time, then DMs you back at that time, even if you asked
+  from inside a group (reminders are personal — the DM always goes to
+  whoever asked, never the group). If no time is understood, he'll ask
+  for one instead of silently doing nothing.
+  - **Reliability**: scheduling is Firestore-backed, not an in-memory
+    timer — a bridge restart between setting a reminder and it firing
+    doesn't lose it; the scheduler catches anything overdue on the very
+    next check. It also runs once immediately on startup (not just every
+    20 seconds), so nothing sits waiting after a cold restart. A send
+    that keeps failing (a transient WhatsApp hiccup) retries a few times,
+    then gives up and logs it to the dashboard's Activity feed instead of
+    silently retrying forever.
+  - **"what do I have scheduled"** lists your own pending reminders with a
+    number per line; **"cancel reminder \<number\>"** or **"cancel my
+    reminder about \<text\>"** cancels one.
+  - **Admin-only bulk reminders**: `"remind 94771234567, 94779876543
+    tomorrow at 9am to submit their assignments"` — a comma-separated list
+    of numbers right after "remind" (no "me") schedules the same reminder
+    DM to every number listed, in one command. Useful for nudging a whole
+    class/batch without a shared group. Gated the same way other
+    privileged commands are — a non-admin gets told plainly they don't
+    have access.
 - **Scheduled/targeted group messages**: `tell group Marketing Team: the
   meeting moved to 3pm` sends immediately; adding a time —
   `tell group Ops tomorrow at 9am: deploy window starts` — schedules it

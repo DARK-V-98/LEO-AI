@@ -996,6 +996,7 @@ const BASE_HELP_LINES = [
   "• Just talk to me normally — ask questions, request a task, etc. Mention a new lead or something to track and I'll log it automatically.",
   '• "poster: <description>" or "flyer of <description>" — I’ll generate an image (attach or reply to a photo to use it as a style reference).',
   '• "remind me in 20 minutes to <note>" or "remind me tomorrow at 9am to <note>" — I’ll DM you back at that time.',
+  '• "what do I have scheduled" / "cancel reminder <number>" or "cancel my reminder about <text>" — check or cancel your own pending reminders.',
   '• "tell group <name>: <message>" — sends to that group now, or schedules it if you include a time.',
   '• "poll: <question>? <option>, <option>, ..." — sends a poll to this chat.',
   '• "write a document about <topic>" / "document: <topic>" / "report on <topic>" — I\'ll research it (live web search when I can) and send back a properly designed PDF. Then "update the document to also include..." / "add X to that document" revises and re-sends it.',
@@ -1015,6 +1016,7 @@ const ADMIN_HELP_LINES = [
   '• "enroll this student <email>" — guided flow: pick a course, pick a batch, confirm, done.',
   '• "change/move/transfer <email>\'s batch" — guided flow to move them to a different batch, closing out the old enrollment as part of the same move.',
   '• "list students in <course>" — full roster with names, emails, and contacts; add "by batch"/"each batch" to break it down per batch instead of one flat list.',
+  '• "remind <number>, <number>, ... <when> to <note>" — e.g. "remind 94771234567, 94779876543 tomorrow at 9am to submit their assignments" — schedules the same reminder DM to every number listed.',
 ];
 
 // Admin commands only show up in the help text for admins — a student
@@ -1952,6 +1954,43 @@ function parseReminder(text) {
   return { due, note: note || "this" };
 }
 
+// --- Admin bulk reminders ("remind <number>, <number>, ... <when> to ...") -
+// Admin-only: schedules the same reminder to a list of phone numbers at
+// once, e.g. "remind 94771234567, 94779876543 tomorrow at 9am to submit
+// their assignments". Deliberately a different trigger than "remind me"
+// (no "me" — a literal comma-separated number list right after "remind")
+// so the two never collide.
+const NUMBERS_REMINDER_PATTERN = /^\s*remind\s+((?:\+?\d[\d\s-]{6,}\d)(?:\s*,\s*\+?\d[\d\s-]{6,}\d)*)\s+(.*)$/i;
+
+function phoneToJid(phone) {
+  const digits = phone.replace(/[^0-9]/g, "");
+  return `${digits}@s.whatsapp.net`;
+}
+
+function parseNumbersReminder(text) {
+  const m = text.match(NUMBERS_REMINDER_PATTERN);
+  if (!m) return null;
+  const numbers = m[1]
+    .split(",")
+    .map((n) => n.replace(/[^\d+]/g, ""))
+    .filter(Boolean);
+  if (numbers.length === 0) return null;
+
+  const rest = m[2];
+  const results = chrono.parse(rest, chronoRef(), { forwardDate: true });
+  if (results.length === 0) return null; // no time found — caller asks for one
+
+  const match = results[0];
+  const due = match.start.date();
+  let note = (rest.slice(0, match.index) + rest.slice(match.index + match.text.length)).trim();
+  note = note
+    .replace(/^(to|that|about)\b\s*/i, "")
+    .replace(/^[,:\-]\s*/, "")
+    .replace(/[,:\-]\s*$/, "")
+    .trim();
+  return { numbers, due, note: note || "this" };
+}
+
 // --- Named-group messages ("tell/message/send group <name>: <message>") ---
 const GROUP_SEND_PATTERN =
   /\b(?:tell|message|send(?:\s+to)?|notify)\s+(?:the\s+)?group\s+([^:,]+?)\s*(?:that\s+)?[:,]\s*(.+)/i;
@@ -2043,9 +2082,65 @@ function formatDue(date) {
   });
 }
 
+// --- Listing / cancelling your own scheduled reminders ---------------------
+const LIST_SCHEDULED_PATTERN =
+  /^\s*(?:what do i have scheduled|my reminders|list my reminders|show my reminders)\s*[?.!]?\s*$/i;
+const CANCEL_SCHEDULED_INDEX_PATTERN = /^\s*cancel\s+reminder\s+(\d+)\s*$/i;
+const CANCEL_SCHEDULED_TEXT_PATTERN = /^\s*cancel\s+(?:my\s+)?reminder\s+(?:about|for)\s+(.+)$/i;
+
+/** Pulls this person's own pending (not sent/cancelled/failed) scheduled
+ * messages, ordered soonest-first — the same order used both when listing
+ * them and when resolving "cancel reminder <N>" against that list, so the
+ * numbers in a fresh listing always line up. */
+async function getOwnPendingScheduled(senderJid) {
+  const snap = await SCHEDULED.where("createdBy", "==", senderJid).where("sent", "==", false).get();
+  return snap.docs
+    .map((d) => ({ id: d.id, ref: d.ref, ...d.data() }))
+    .filter((d) => !d.cancelled && !d.failed)
+    .sort((a, b) => a.dueAt - b.dueAt);
+}
+
+async function handleListScheduledCommand(senderJid) {
+  const pending = await getOwnPendingScheduled(senderJid);
+  if (pending.length === 0) return "You don't have anything scheduled right now.";
+  const lines = pending.map((p, i) => `${i + 1}. ${formatDue(new Date(p.dueAt))} — ${p.message}`);
+  return `Your scheduled reminders:\n${lines.join("\n")}\n\nSay "cancel reminder <number>" to cancel one.`;
+}
+
+async function handleCancelScheduledByIndex(senderJid, index) {
+  const pending = await getOwnPendingScheduled(senderJid);
+  const target = pending[index - 1];
+  if (!target) {
+    return `I don't have a reminder #${index} — say "what do I have scheduled" to see the current list.`;
+  }
+  await target.ref.update({ cancelled: true, cancelledAt: Date.now() });
+  return `Cancelled: "${target.message}" (was due ${formatDue(new Date(target.dueAt))}).`;
+}
+
+async function handleCancelScheduledByText(senderJid, queryText) {
+  const pending = await getOwnPendingScheduled(senderJid);
+  const q = queryText.trim().toLowerCase();
+  const matches = pending.filter((p) => p.message?.toLowerCase().includes(q));
+  if (matches.length === 0) return `Couldn't find a scheduled reminder matching "${queryText}".`;
+  if (matches.length > 1) {
+    const lines = matches.map((p) => `- ${p.message} (due ${formatDue(new Date(p.dueAt))})`);
+    return `Found more than one match — be more specific:\n${lines.join("\n")}`;
+  }
+  const target = matches[0];
+  await target.ref.update({ cancelled: true, cancelledAt: Date.now() });
+  return `Cancelled: "${target.message}" (was due ${formatDue(new Date(target.dueAt))}).`;
+}
+
+// After this many failed attempts, stop retrying a scheduled message and
+// flag it loudly instead of silently looping forever on every 20-second
+// tick — a transient blip gets a few retries for free, but a message
+// that's genuinely stuck gets surfaced instead of just never arriving.
+const SCHEDULED_MAX_ATTEMPTS = 5;
+
 /** Runs on an interval: sends anything in scheduledMessages whose time has
- * come. Deliberately checks `sent` only and filters the due time in JS
- * rather than in the Firestore query, to avoid needing a composite index. */
+ * come. Deliberately checks `sent` only and filters due time/cancellation/
+ * failure in JS rather than in the Firestore query, to avoid needing a
+ * composite index. */
 async function runScheduler() {
   if (!sock || socketState !== "open") return;
   const now = Date.now();
@@ -2053,6 +2148,7 @@ async function runScheduler() {
     const snap = await SCHEDULED.where("sent", "==", false).get();
     for (const doc of snap.docs) {
       const data = doc.data();
+      if (data.cancelled || data.failed) continue;
       if (!data.dueAt || data.dueAt > now) continue;
       try {
         const prefix = data.type === "reminder" ? "⏰ Reminder: " : "";
@@ -2069,6 +2165,32 @@ async function runScheduler() {
           .catch(() => {});
       } catch (err) {
         console.error("Failed to send a scheduled message:", err);
+        const attempts = (data.attempts || 0) + 1;
+        if (attempts >= SCHEDULED_MAX_ATTEMPTS) {
+          await doc.ref
+            .update({ attempts, failed: true, failedAt: Date.now(), lastError: String(err?.message || err) })
+            .catch(() => {});
+          await db
+            .collection("activity")
+            .add({
+              title: "A scheduled message failed to send",
+              detail: `${data.targetLabel}: "${data.message.slice(0, 60)}" — gave up after ${attempts} attempts`,
+              type: "warn",
+              createdAt: Date.now(),
+            })
+            .catch(() => {});
+          if (DAILY_DIGEST_JID) {
+            await sock
+              .sendMessage(DAILY_DIGEST_JID, {
+                text:
+                  `⚠️ A scheduled message to ${data.targetLabel} failed ${attempts} times and I've ` +
+                  `given up on it: "${data.message.slice(0, 80)}"`,
+              })
+              .catch(() => {});
+          }
+        } else {
+          await doc.ref.update({ attempts }).catch(() => {});
+        }
       }
     }
   } catch (err) {
@@ -2266,7 +2388,7 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !documentTopic
             ? parseReminder(askText)
             : null;
-        const groupSend =
+        const numbersReminder =
           !rememberMatch &&
           !whatRemember &&
           !forgetMe &&
@@ -2277,6 +2399,68 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !documentUpdateInstruction &&
           !documentTopic &&
           !reminder
+            ? parseNumbersReminder(askText)
+            : null;
+        const listScheduledMatch =
+          !rememberMatch &&
+          !whatRemember &&
+          !forgetMe &&
+          !enrollmentCommand &&
+          !pollMatch &&
+          !essayScoreRequest &&
+          !speakingTaskRequest &&
+          !documentUpdateInstruction &&
+          !documentTopic &&
+          !reminder &&
+          !numbersReminder
+            ? LIST_SCHEDULED_PATTERN.test(askText)
+            : false;
+        const cancelScheduledIndexMatch =
+          !rememberMatch &&
+          !whatRemember &&
+          !forgetMe &&
+          !enrollmentCommand &&
+          !pollMatch &&
+          !essayScoreRequest &&
+          !speakingTaskRequest &&
+          !documentUpdateInstruction &&
+          !documentTopic &&
+          !reminder &&
+          !numbersReminder &&
+          !listScheduledMatch
+            ? askText.match(CANCEL_SCHEDULED_INDEX_PATTERN)
+            : null;
+        const cancelScheduledTextMatch =
+          !rememberMatch &&
+          !whatRemember &&
+          !forgetMe &&
+          !enrollmentCommand &&
+          !pollMatch &&
+          !essayScoreRequest &&
+          !speakingTaskRequest &&
+          !documentUpdateInstruction &&
+          !documentTopic &&
+          !reminder &&
+          !numbersReminder &&
+          !listScheduledMatch &&
+          !cancelScheduledIndexMatch
+            ? askText.match(CANCEL_SCHEDULED_TEXT_PATTERN)
+            : null;
+        const groupSend =
+          !rememberMatch &&
+          !whatRemember &&
+          !forgetMe &&
+          !enrollmentCommand &&
+          !pollMatch &&
+          !essayScoreRequest &&
+          !speakingTaskRequest &&
+          !documentUpdateInstruction &&
+          !documentTopic &&
+          !reminder &&
+          !numbersReminder &&
+          !listScheduledMatch &&
+          !cancelScheduledIndexMatch &&
+          !cancelScheduledTextMatch
             ? parseGroupSend(askText)
             : null;
 
@@ -2653,6 +2837,56 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
             remember(remoteJid, "assistant", errText);
           }
+        } else if (numbersReminder) {
+          if (!isWhatsAppAdmin(senderJid)) {
+            await activeSock.sendMessage(remoteJid, { text: NOT_ADMIN_TEXT });
+            remember(remoteJid, "assistant", NOT_ADMIN_TEXT);
+          } else {
+            try {
+              const dueAt = numbersReminder.due.getTime();
+              for (const number of numbersReminder.numbers) {
+                await scheduleMessage({
+                  type: "reminder",
+                  targetJid: phoneToJid(number),
+                  targetLabel: `+${number.replace(/^\+/, "")}`,
+                  message: numbersReminder.note,
+                  dueAt,
+                  createdBy: senderJid,
+                });
+              }
+              const confirmText =
+                `Got it — I'll remind ${numbersReminder.numbers.length} number${numbersReminder.numbers.length === 1 ? "" : "s"} ` +
+                `about "${numbersReminder.note}" on ${formatDue(numbersReminder.due)}.`;
+              await activeSock.sendMessage(remoteJid, { text: confirmText });
+              remember(remoteJid, "assistant", confirmText);
+              await db
+                .collection("activity")
+                .add({
+                  title: "Scheduled a bulk reminder via WhatsApp",
+                  detail: `${numbersReminder.numbers.length} number(s): "${numbersReminder.note.slice(0, 60)}"`,
+                  type: "ok",
+                  createdAt: Date.now(),
+                })
+                .catch(() => {});
+            } catch (err) {
+              console.error("Failed to schedule bulk reminder:", err);
+              const errText = "Something went wrong setting that reminder — please try again.";
+              await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
+              remember(remoteJid, "assistant", errText);
+            }
+          }
+        } else if (listScheduledMatch) {
+          const text = await handleListScheduledCommand(senderJid);
+          await activeSock.sendMessage(remoteJid, { text });
+          remember(remoteJid, "assistant", text);
+        } else if (cancelScheduledIndexMatch) {
+          const text = await handleCancelScheduledByIndex(senderJid, Number(cancelScheduledIndexMatch[1]));
+          await activeSock.sendMessage(remoteJid, { text });
+          remember(remoteJid, "assistant", text);
+        } else if (cancelScheduledTextMatch) {
+          const text = await handleCancelScheduledByText(senderJid, cancelScheduledTextMatch[1]);
+          await activeSock.sendMessage(remoteJid, { text });
+          remember(remoteJid, "assistant", text);
         } else if (groupSend) {
           try {
             const group = await resolveGroup(activeSock, groupSend.groupNameRaw).catch((err) => {
@@ -3005,6 +3239,12 @@ if (fs.existsSync(AUTH_DIR) && fs.readdirSync(AUTH_DIR).length > 0) {
 
 // Reminders and scheduled group messages — checked frequently enough that
 // "remind me in 5 minutes" is actually useful, not just daily digests.
+// Also run once immediately rather than waiting for the first 20-second
+// tick — if the process was down for a while (a crash, a slow redeploy)
+// and something came due in the meantime, it goes out right away on
+// reconnect instead of sitting for up to another 20 seconds. Safe to call
+// before the socket is even open — runScheduler no-ops until it is.
+runScheduler();
 setInterval(runScheduler, 20_000);
 
 // The digest itself only needs to be checked a few times around the

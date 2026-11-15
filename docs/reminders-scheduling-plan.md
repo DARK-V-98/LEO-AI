@@ -1,10 +1,15 @@
 # Reminders & Scheduled Messages — Reliability Plan
 
+**Status (2026-11-15): sections 3.1, 3.2, and 3.3 are implemented and
+pushed** (`services/whatsapp-bridge/index.js`), along with an admin-only
+bulk-reminder command that wasn't in the original plan — see §7. Sections
+3.4 (dashboard panel) and 3.5 (Railway restart-policy check) are still
+open.
+
 **What this is:** a plan for making "remind me in 10 minutes" / "remind me
 tomorrow at 9am" rock-solid — fires at the right time, every time, to the
 right chat, even across a restart — plus giving admins visibility into
-what's pending. This is a plan, not yet implemented beyond what's noted as
-"already working" below.
+what's pending.
 
 ## 1. What already works today
 
@@ -159,3 +164,39 @@ developer-read, matching every other bridge-owned collection's pattern.
 - No change to how `"remind me"` or `"tell group X at Y"` are phrased or
   parsed — existing commands keep working exactly as documented in
   `services/whatsapp-bridge/README.md`.
+
+## 7. Added during implementation: admin bulk reminders
+
+Not in the original plan, but built alongside it on request: an
+admin-only command to schedule the *same* reminder to a whole list of
+phone numbers at once — `"remind 94771234567, 94779876543 tomorrow at
+9am to submit their assignments"`. A comma-separated number list right
+after `"remind"` (no `"me"`) is the trigger, so it can never collide with
+the personal `"remind me ..."` form. Internally it's just N separate
+`scheduledMessages` documents, one per number, targeting
+`phoneToJid(number)` — `runScheduler()` needed no changes at all, since
+each document is independent regardless of who created it or how many
+siblings it has. Gated the same way other privileged commands are
+(`isWhatsAppAdmin`), since it's bulk-messaging arbitrary numbers on a
+schedule.
+
+## 8. Implementation notes (what actually shipped)
+
+- **3.1** — `runScheduler()` is now called once immediately at module
+  load (right next to where the `setInterval` is set up), in addition to
+  the interval. It safely no-ops if the socket isn't open yet.
+- **3.2** — `"what do I have scheduled"`, `"cancel reminder <N>"`, and
+  `"cancel my reminder about <text>"`, scoped to the asker's own
+  `createdBy` reminders. Listing and index-based cancellation share one
+  `getOwnPendingScheduled()` helper so the numbering is always consistent
+  between a listing and a following cancel — both query+sort the same way
+  (soonest-due first).
+- **3.3** — an `attempts` counter increments on every failed send; at 5
+  failed attempts the document is marked `failed: true` (and excluded
+  from all future scheduler passes), an `activity` entry is logged with
+  type `"warn"` (the dashboard's existing type, not a new `"error"` type
+  that doesn't exist in `companyData.ts`), and — if `DAILY_DIGEST_JID` is
+  configured — a one-time DM alert goes to that number.
+- **3.4** and **3.5** are still open — no dashboard panel yet, and the
+  Railway restart-policy setting hasn't been confirmed (it's a dashboard
+  setting change, not something this session can verify or set).
