@@ -50,7 +50,7 @@ export default function ClassGroupsPanel() {
           <div>
             <h2 className="text-sm font-semibold text-foreground">Class groups</h2>
             <p className="text-[11px] text-muted">
-              Mark a WhatsApp group as a class to turn on essay/speaking scoring inside it
+              Mark a WhatsApp group as a class to turn on essay/speaking scoring — and let LEO chat as trainer — inside it
             </p>
           </div>
         </div>
@@ -66,8 +66,10 @@ export default function ClassGroupsPanel() {
         <>
           <p className="text-[11px] text-muted">
             Only groups marked here will respond to &quot;Leo score this essay&quot; — everywhere
-            else, that command is simply not recognized. This can only be set from here, never
-            from WhatsApp itself.
+            else, that command is simply not recognized. Marking a group also means anyone in
+            it gets normal trainer replies from LEO when they mention him — everywhere else
+            (an unmarked group, or a DM from a number not in Students), LEO stays silent. This
+            can only be set from here, never from WhatsApp itself.
           </p>
 
           <div className="flex flex-col gap-1.5">

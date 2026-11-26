@@ -322,24 +322,17 @@ flowchart TD
 5. *(Later, only if needed)* Embedding-based retrieval upgrade (§3.3
    Option B).
 
-## 9. What I need you to decide before I start building
+## 9. Decisions (confirmed)
 
-- **Persona identity** — what should his name/background/voice actually
-  be? (Keep "LEO" but as a person's name rather than an acronym? Years of
-  experience, teaching style, any specific phrases/personality you want
-  baked in?)
-- **Unauthorized senders** — confirmed silence (no reply at all), or
-  should a first-time unauthorized DM get exactly one polite
-  "this number isn't registered for LEO, ask your trainer/admin to add
-  you" message so people aren't left wondering why nothing happened?
-- **Group access strictness** — as in §2.3: is "message came from inside
-  a marked class group" enough on its own (my recommendation), or do you
-  want it narrowed to only group members who are *also* individually
-  added to `students`?
-- **Expiry behavior** — when a student's time runs out, silent cutoff (my
-  default assumption), or should LEO send one final "your access has
-  expired, contact your trainer to renew" message at the moment it
-  expires?
-- **Who can manage `students`** — developer-only (matching
-  `whatsappAdmins`/`dashboardAdmins` today), or should dashboard admins
-  you've already added also be allowed to add/remove students day to day?
+- **Persona identity** — drafted by Claude (see `llmRouter.ts` once
+  implemented), editable afterward.
+- **Unauthorized senders** — silent. No reply at all, ever.
+- **Group access scope** — anyone inside a marked `classGroups` entry gets
+  replies; no extra per-person check.
+- **Expiry behavior** — one final "your access has expired, contact your
+  trainer to renew" message sent the moment a student's `expiresAt`
+  passes, then silent for every message after that (tracked via a
+  `expiryNoticeSent` flag on the student doc so it only ever sends once).
+- **Who manages `students`** — developer-only to start (matches
+  `whatsappAdmins`/`dashboardAdmins`), same as every other admin-granting
+  collection in this codebase. Easy to widen later if needed.

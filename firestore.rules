@@ -180,5 +180,16 @@ service cloud.firestore {
       allow read: if isDeveloper();
       allow write: if false;
     }
+
+    // Students — the closed-classroom allowlist. A WhatsApp DM only gets
+    // replies from LEO if the sender's phone number is in here (and not
+    // expired) — see isAuthorizedSender() in the bridge. Developer-only to
+    // manage, same reasoning as whatsappAdmins/dashboardAdmins: granting
+    // access to a real person's conversations with LEO shouldn't be
+    // self-service for anyone but the developer.
+    match /students/{phoneDigits} {
+      allow read: if isDeveloper();
+      allow create, update, delete: if isDeveloper();
+    }
   }
 }

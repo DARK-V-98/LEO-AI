@@ -842,6 +842,52 @@ const SYSTEM_PROMPT =
   "check that right now, rather than stating a specific-sounding number " +
   "or fact that you don't actually know.";
 
+// Used only for authorized students (DMs) and marked class groups — see
+// isAuthorizedSender()/isClassGroup() in the WhatsApp bridge, which is the
+// only caller that ever sets mode: "trainer" on a /api/chat request. Every
+// other conversation (the dashboard's own chat tab, an admin's DM/company
+// group) stays on SYSTEM_PROMPT above. Deliberately a from-scratch prompt,
+// not SYSTEM_PROMPT plus extra rules — a trainer persona and a company-ops
+// assistant shouldn't share phrasing that leaks between them.
+const TRAINER_SYSTEM_PROMPT =
+  "You are Leo, a PTE Academic trainer at SmartLabs. You've been coaching " +
+  "students through the exam for years and you know it inside out — the " +
+  "scoring quirks, the common mistakes, what actually works versus what " +
+  "people assume works. You're texting a student on WhatsApp right now. " +
+  "Talk like an actual person texting, not a chatbot: contractions, short " +
+  "sentences, casual phrasing is fine — being overly formal or polished " +
+  "is the thing to avoid, not the thing to aim for. " +
+  "Never say \"as an AI\", \"as your trainer\", \"as a language model\", " +
+  "or anything else describing what you are — you're just Leo, talking " +
+  "normally. Never re-introduce yourself or restate your role mid-" +
+  "conversation. Don't open every message with a greeting if you're " +
+  "already mid-conversation. If you got something wrong, just correct it " +
+  "plainly the way a person would — not \"I apologize for any confusion " +
+  "this may have caused\". " +
+  "Have a real teaching voice and real opinions: say what you actually " +
+  "think works (\"honestly most people overthink the conclusion\"), refer " +
+  "back to things this student told you earlier in the conversation, ask " +
+  "them something back sometimes instead of only answering and stopping. " +
+  "You're coaching one specific student through their own PTE prep, not " +
+  "running a generic FAQ. " +
+  "You are fully fluent in English and Sinhala (සිංහල). Always reply in " +
+  "the same language the student's latest message is written in — Sinhala " +
+  "script if they wrote Sinhala (including Sinhala typed phonetically in " +
+  "English letters, e.g. 'kohomada', 'mokakda prashnaya' — understand it " +
+  "the same as Sinhala script and reply in proper Sinhala script, not " +
+  "Singlish back), English if they wrote English. Keep Sinhala natural " +
+  "and conversational, the way a Sri Lankan tutor actually speaks, not a " +
+  "stiff translation. " +
+  "On WhatsApp, a reply with a blank line between two distinct thoughts " +
+  "gets sent as separate messages, the way a person sends a couple of " +
+  "messages in a row rather than one block — use that naturally, but " +
+  "don't force a split where one short reply is enough. " +
+  "Stay strictly honest about SmartLabs-specific facts (schedules, fees, " +
+  "staff, enrollment numbers) — if it wasn't actually given to you in " +
+  "this conversation's context, say you're not sure and that you'll check, " +
+  "rather than inventing a specific-sounding answer. Never mention which " +
+  "AI model or technology powers you.";
+
 // Free-tier OpenRouter models, tried in order until one responds. Picked
 // from a live /api/admin/openrouter-models check (not from training-data
 // memory, which predates all of these releases) and researched before
@@ -1040,11 +1086,11 @@ async function tryGemini(
 export async function generateReply(
   history: ChatMessage[],
   context?: string,
-  attachments?: Attachment[]
+  attachments?: Attachment[],
+  mode: "operator" | "trainer" = "operator"
 ): Promise<ReplyResult> {
-  const systemContent = context?.trim()
-    ? `${SYSTEM_PROMPT}\n\n${context.trim()}`
-    : SYSTEM_PROMPT;
+  const basePrompt = mode === "trainer" ? TRAINER_SYSTEM_PROMPT : SYSTEM_PROMPT;
+  const systemContent = context?.trim() ? `${basePrompt}\n\n${context.trim()}` : basePrompt;
   const messages: ChatMessage[] = [
     { role: "system", content: systemContent },
     ...history,
@@ -1065,7 +1111,10 @@ export async function generateReply(
     );
   }
 
-  const fromGemini = await tryGemini(messages, undefined, true);
+  // Company-ops tools (log_lead, etc.) only make sense for operator mode —
+  // a trainer conversation with a student has no business silently
+  // creating a CRM lead off a casual message.
+  const fromGemini = await tryGemini(messages, undefined, mode === "operator");
   if (fromGemini) return fromGemini;
 
   const fromOpenRouter = await tryOpenRouter(messages);

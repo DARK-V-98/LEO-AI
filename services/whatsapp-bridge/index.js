@@ -709,6 +709,47 @@ function getClassGroup(jid) {
   return classGroupJids.get(jid) || null;
 }
 
+// --- Students (closed-classroom access gate) -----------------------------
+// LEO only replies to: admins (always, anywhere), anyone inside a marked
+// classGroups group, or a DM from a number in this list whose expiresAt
+// (if set) hasn't passed yet. Every other sender — any other number, any
+// other group — is silently ignored: no reply, no history saved, no
+// activity logged. Same live-listener pattern as adminJids/classGroupJids.
+const STUDENTS = db.collection("students");
+const studentsByJid = new Map(); // jid -> {phoneNumber, name, expiresAt, expiryNoticeSent}
+STUDENTS.onSnapshot(
+  (snap) => {
+    studentsByJid.clear();
+    snap.docs.forEach((d) => studentsByJid.set(phoneToJid(d.id), { docId: d.id, ...d.data() }));
+  },
+  (err) => console.error("Failed to watch students:", err)
+);
+
+const EXPIRY_NOTICE_TEXT =
+  "Hi — your access to LEO has expired. Please contact your trainer/admin to renew it.";
+
+/** Decides whether `senderJid` gets any response at all, in this
+ * `remoteJid` chat. Admins always do; inside a marked class group anyone
+ * does; a DM needs an active (non-expired) students entry. An expired
+ * student gets exactly one notice (tracked via expiryNoticeSent so it
+ * never repeats), then silence. */
+async function isAuthorizedSender(activeSock, senderJid, remoteJid, isGroup) {
+  if (isWhatsAppAdmin(senderJid)) return true;
+  if (isGroup) return isClassGroup(remoteJid);
+
+  const student = studentsByJid.get(senderJid);
+  if (!student) return false;
+  if (!student.expiresAt || student.expiresAt > Date.now()) return true;
+
+  if (!student.expiryNoticeSent) {
+    await activeSock.sendMessage(remoteJid, { text: EXPIRY_NOTICE_TEXT }).catch(() => {});
+    STUDENTS.doc(student.docId)
+      .update({ expiryNoticeSent: true })
+      .catch((err) => console.error("Failed to mark expiry notice sent:", err));
+  }
+  return false;
+}
+
 const AUTH_DIR = process.env.AUTH_DIR || "./auth_info";
 const logger = pino({ level: process.env.LOG_LEVEL || "warn" });
 
@@ -1186,12 +1227,18 @@ async function askLeo(jid, senderJid, isGroup, attachment) {
   }
   try {
     const context = await getCompanyContext(senderJid, isGroup);
+    // Trainer persona applies to the conversation, not the sender — a
+    // marked class group is a PTE class regardless of who's typing in it;
+    // a student's own DM is always trainer mode. Everything else (an
+    // admin's personal DM/company group doing ops work) stays "operator".
+    const mode = isGroup ? (isClassGroup(jid) ? "trainer" : "operator") : studentsByJid.has(senderJid) ? "trainer" : "operator";
     const res = await fetch(`${WEB_BASE_URL}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         history: chatMemory.get(jid),
         context,
+        mode,
         attachments: attachment ? [{ data: attachment.data, mimeType: attachment.mimeType }] : undefined,
       }),
     });
@@ -2350,6 +2397,14 @@ const pendingTurns = new Map(); // "remoteJid:senderJid" -> { parts, senderJid, 
 
 async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText, msg }) {
   try {
+    // The closed-classroom gate — checked before anything else touches
+    // Firestore or the model, so an unauthorized sender leaves no trace
+    // at all (no history saved, no activity logged), same as a real
+    // trainer simply never noticing a stranger's message.
+    if (!(await isAuthorizedSender(activeSock, senderJid, remoteJid, isGroup))) {
+      return;
+    }
+
     const attachment = msg ? await getAttachment(activeSock, msg) : null;
 
     // Every message gets permanently saved here, once, regardless of

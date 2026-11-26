@@ -5,6 +5,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const history = body?.history;
   const context = typeof body?.context === "string" ? body.context : undefined;
+  const mode = body?.mode === "trainer" ? "trainer" : "operator";
   const attachments: Attachment[] | undefined = Array.isArray(body?.attachments)
     ? body.attachments
         .filter((a: unknown): a is Attachment => {
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "history is required" }, { status: 400 });
   }
 
-  const result = await generateReply(history, context, attachments);
+  const result = await generateReply(history, context, attachments, mode);
   // `reply` stays a plain string — every existing caller (the web chat UI,
   // the WhatsApp bridge's askLeo) reads it that way. `actions` is new and
   // additive: only a caller that knows to look (currently just the bridge,
