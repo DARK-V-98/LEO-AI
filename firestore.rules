@@ -191,5 +191,23 @@ service cloud.firestore {
       allow read: if isDeveloper();
       allow create, update, delete: if isDeveloper();
     }
+
+    // LEO's PTE training knowledge base — the "Brain" page. Unlike
+    // companyKnowledge (bridge-written facts), this is authored directly
+    // from the dashboard by the developer, so it's full CRUD here, not
+    // Admin-SDK-only. Any signed-in staff member can read it (useful
+    // context for anyone helping a student), only the developer writes.
+    match /pteKnowledge/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isDeveloper();
+    }
+
+    // Course batch/intake dates shown on the Brain page's "other details"
+    // section — plain company info, developer-managed, same reasoning as
+    // pteKnowledge.
+    match /courseDates/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isDeveloper();
+    }
   }
 }

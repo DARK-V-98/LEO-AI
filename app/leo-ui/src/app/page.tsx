@@ -9,7 +9,7 @@ import ChatPanel from "@/components/ChatPanel";
 import HomeHero from "@/components/HomeHero";
 import VoicesPanel from "@/components/VoicesPanel";
 import WhatsAppChatsPanel from "@/components/WhatsAppChatsPanel";
-import KnowledgeBasePanel from "@/components/KnowledgeBasePanel";
+import BrainPanel from "@/components/BrainPanel";
 import AIModelPanel from "@/components/AIModelPanel";
 import ChatbotSetupPanel from "@/components/ChatbotSetupPanel";
 import AnalyticsPanel from "@/components/AnalyticsPanel";
@@ -24,7 +24,7 @@ import { LeoMoodProvider, LeoThemeSync } from "@/hooks/useLeoMood";
 
 const PAGE_META: Record<Exclude<NavId, "home" | "chat">, { title: string; subtitle: string }> = {
   conversations: { title: "Conversations", subtitle: "Every WhatsApp chat LEO is part of" },
-  knowledge: { title: "Knowledge Base", subtitle: "Facts LEO knows about the company" },
+  brain: { title: "Brain", subtitle: "LEO's PTE training knowledge, company facts, and course dates" },
   "ai-model": { title: "AI Model", subtitle: "Live status of LEO's AI providers" },
   "chatbot-setup": { title: "Chatbot Setup", subtitle: "Groups configured for essay/speaking scoring" },
   analytics: { title: "Analytics", subtitle: "Tasks, leads, ads and SEO — once connectors are wired up" },
@@ -132,7 +132,7 @@ function DashboardApp() {
             </div>
           )}
 
-          {nav === "knowledge" && <KnowledgeBasePanel />}
+          {nav === "brain" && isDeveloper && <BrainPanel />}
           {nav === "ai-model" && <AIModelPanel />}
           {nav === "chatbot-setup" && <ChatbotSetupPanel />}
           {nav === "analytics" && <AnalyticsPanel />}
@@ -146,7 +146,7 @@ function DashboardApp() {
             </div>
           )}
 
-          {(nav === "users" || nav === "integrations") && !isDeveloper ? (
+          {(nav === "users" || nav === "integrations" || nav === "brain") && !isDeveloper ? (
             <p className="rounded-xl border border-panel-border bg-black/[0.03] p-4 text-center text-xs text-muted">
               This section is developer-only.
             </p>

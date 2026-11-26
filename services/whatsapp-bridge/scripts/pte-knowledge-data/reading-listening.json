@@ -1,0 +1,417 @@
+[
+  {
+    "topic": "reading.skimming.strategy",
+    "tags": ["reading", "skimming", "gist", "main idea", "skim"],
+    "question": "How do I skim a reading passage?",
+    "content": "Skimming means reading quickly to understand the general meaning (gist) of a passage — to find the main idea, identify the topic, understand the writer's purpose, and locate each paragraph's theme. To skim: read the title, the first paragraph, the first and last sentence of each paragraph, and the conclusion. While doing this, look for repeated words, repeated concepts, the main argument, and the writer's opinion. Example: if a paragraph mentions global warming, carbon emissions, and renewable energy repeatedly, the main idea is climate change and solutions to reduce environmental damage — you don't need every detail to identify that.",
+    "priority": 4
+  },
+  {
+    "topic": "reading.scanning.strategy",
+    "tags": ["reading", "scanning", "keywords", "search", "find information"],
+    "question": "How do I scan a passage for specific information?",
+    "content": "Scanning means searching for specific information — dates, names, numbers, statistics, keywords — rather than reading for overall meaning. Read the question first, underline its keywords, then search the passage for the same or related words and read only the nearby lines. Example: for the question 'When was the organization founded?', the keyword is 'founded', so also search for its synonyms: established, started, created.",
+    "priority": 4
+  },
+  {
+    "topic": "reading.vocabulary.contextual-meaning",
+    "tags": ["reading", "vocabulary", "context", "word meaning", "contextual"],
+    "question": "How do I work out what a word means in a PTE reading passage?",
+    "content": "Vocabulary meaning changes depending on context, so always determine a word's meaning from the surrounding sentence rather than assuming a single fixed definition. Example: 'The bank approved the loan' — bank means financial institution. 'The children played on the river bank' — bank means the side of a river. Same word, different meaning depending on context.",
+    "priority": 3
+  },
+  {
+    "topic": "reading.vocabulary.synonyms-paraphrasing",
+    "tags": ["reading", "synonyms", "paraphrasing", "vocabulary", "multiple choice"],
+    "question": "Why can't I find the exact word from the question in the passage?",
+    "content": "PTE reading questions are often paraphrased — they use synonyms of the words that appear in the passage, not the exact same words. Never search for exact words only; search for synonyms too. Common passage-to-question synonym pairs: increase→rise, reduce→decrease, important→significant, difficult→challenging, buy→purchase, help→assist, start→commence, end→conclude.",
+    "priority": 4
+  },
+  {
+    "topic": "reading.fill-in-blanks.grammar-rules",
+    "tags": ["reading", "writing", "fill in the blanks", "grammar", "articles", "prepositions", "tense"],
+    "question": "What grammar rules matter most for Fill in the Blanks?",
+    "content": "Reading & Writing Fill in the Blanks is largely based on grammar, collocation, vocabulary, and meaning. Four key grammar rules: (1) Subject-verb agreement — singular subject needs a singular verb ('The student studies daily', not 'study'), plural subject needs a plural verb ('Students study daily'). (2) Tense consistency — match the time context: past ('Yesterday he went home'), present ('Every day he goes home'), future ('Tomorrow he will go home'). (3) Articles — 'a' before singular countable nouns ('a book'), 'an' before vowel sounds ('an engineer'), 'the' for a specific, already-identified noun ('the report submitted yesterday'). (4) Prepositions follow fixed patterns that must be memorised: interested in, depend on, responsible for, participate in, contribute to.",
+    "priority": 5
+  },
+  {
+    "topic": "reading.fill-in-blanks.collocations",
+    "tags": ["reading", "writing", "collocations", "fill in the blanks", "word partnerships"],
+    "question": "What are collocations and why do they matter for Fill in the Blanks?",
+    "content": "A collocation is a natural word partnership that native speakers use automatically — getting the collocation wrong is a very common mistake even when grammar is technically fine. Common academic collocations: make a decision / make progress (not 'do a decision'); take responsibility / take action / take notes; conduct research / conduct an investigation; reach a conclusion / reach an agreement; raise awareness / raise questions; draw attention / draw conclusions. Watch adjective collocations too: 'strong argument' and 'strong evidence' are correct, but 'powerful evidence' is not; 'heavy rain' and 'heavy traffic' are correct, but 'strong traffic' is not.",
+    "priority": 4
+  },
+  {
+    "topic": "reading.fill-in-blanks.context-based-choice",
+    "tags": ["reading", "fill in the blanks", "meaning", "context", "logic"],
+    "question": "What do I do when more than one answer seems grammatically correct in Fill in the Blanks?",
+    "content": "Often the grammar is correct for multiple candidate answers in a blank — in that case, meaning decides the answer, not grammar. Always ask: 'Does this idea logically fit the context?' Example: 'Scientists ___ a new species.' Both 'discovered' and 'created' are grammatically fine, but the correct answer is 'discovered', because scientists discover species, they do not create them.",
+    "priority": 4
+  },
+  {
+    "topic": "reading.multiple-choice.common-traps",
+    "tags": ["reading", "multiple choice", "traps", "extreme words", "outside information"],
+    "question": "What are the common traps in PTE Reading multiple choice questions?",
+    "content": "Three common traps in Reading multiple choice: (1) Extreme words — be suspicious of options containing 'always', 'never', 'every', 'impossible', 'completely' — these are often wrong because real passages rarely make absolute claims. (2) Partially correct answers — these contain one correct idea but are overall incorrect; this is the most dangerous trap because it feels almost right. (3) Outside information — an option may be true in real life but isn't actually supported by the passage; ignore personal/general knowledge and judge options strictly by what the passage says.",
+    "priority": 5
+  },
+  {
+    "topic": "reading.reorder-paragraphs.sentence-types",
+    "tags": ["reading", "reorder paragraphs", "topic sentence", "supporting sentence", "concluding sentence"],
+    "question": "How do I identify the topic sentence in Reorder Paragraphs?",
+    "content": "Reorder Paragraphs is all about logic between three sentence types: Topic Sentence (the opening sentence, introduces the subject), Supporting Sentences (expand ideas from the topic sentence), and Concluding Sentence (usually the final sentence, wraps up the discussion). A topic sentence has independent meaning (can stand alone, e.g. 'Climate change is one of the most significant environmental challenges facing modern societies'), avoids pronouns like he/she/they/this/that/these/those/such (because the reader doesn't yet know what they refer to), introduces a new topic with a broad statement, and avoids referential/backward-looking terms like 'this issue', 'these findings', 'such developments', 'their impact' (since nothing has been mentioned yet). Supporting sentences use markers like 'for example'/'for instance' (examples), 'according to research'/'studies indicate' (evidence), 'additionally'/'furthermore'/'moreover' (details), 'therefore'/'consequently'/'as a result' (cause and effect). Concluding sentences often summarise key points ('Overall, these findings demonstrate...'), offer reflection ('These developments highlight...'), state the author's final opinion ('Ultimately, governments must act decisively'), state a result ('As a result, productivity improved significantly'), or point to future direction ('Future research may provide further insights into this issue').",
+    "priority": 5
+  },
+  {
+    "topic": "reading.reorder-paragraphs.linking-devices",
+    "tags": ["reading", "reorder paragraphs", "linking words", "connectives", "sequencing"],
+    "question": "What linking words help with Reorder Paragraphs?",
+    "content": "Group linking devices by function to help sequence paragraphs correctly: Addition — furthermore, moreover, additionally, besides. Contrast — however, nevertheless, on the other hand, in contrast. Result — therefore, consequently, thus, hence. Example — for example, for instance, such as. Time sequence — first, then, subsequently, finally. A sentence that opens with one of these words is signalling its relationship to the sentence before it, which tells you where it belongs in the order.",
+    "priority": 4
+  },
+  {
+    "topic": "reading.reorder-paragraphs.pronoun-and-article-clues",
+    "tags": ["reading", "reorder paragraphs", "pronouns", "pronoun chains", "definite article", "the"],
+    "question": "How do pronouns and 'the' help me order paragraphs correctly?",
+    "content": "Two reliable logic clues for Reorder Paragraphs: (1) Pronoun chains — a sentence containing 'this', 'these', 'those', 'it', or 'they' usually follows the sentence that first introduces the noun it refers to. Example: Sentence A 'Researchers developed a new vaccine.' Sentence B 'This breakthrough may save millions of lives.' A must come before B. (2) The definite article clue — when a sentence uses 'the' before a noun, that noun was probably mentioned earlier (without 'a'/'an') in an earlier sentence. Example: A 'Scientists discovered a planet.' B 'The planet appears habitable.' A comes first because B's 'the planet' refers back to A's 'a planet'.",
+    "priority": 4
+  },
+  {
+    "topic": "reading.listening.answer-order-strategy",
+    "tags": ["reading", "listening", "fill in the blanks", "strategy", "uncertain", "grammar", "collocation"],
+    "question": "What should I check, in order, when I'm not sure of an answer in Reading or Listening Fill in the Blanks?",
+    "content": "When uncertain in Reading or Listening Fill in the Blanks, check in this order: Step 1 — grammar. Step 2 — collocation. Step 3 — logical meaning. Step 4 — paragraph flow. Step 5 — academic style. The answer that is grammatically correct, naturally collocated, logically meaningful, and contextually connected is almost always the correct PTE answer.",
+    "priority": 5
+  },
+  {
+    "topic": "listening.summarize-spoken-text.strategy",
+    "tags": ["listening", "summarize spoken text", "sst", "note taking", "summary"],
+    "question": "How do I approach Summarize Spoken Text?",
+    "content": "Goal: capture the main idea, supporting points, and conclusion. Note-taking method: use abbreviations while listening — Gov=Government, Env=Environment, Edu=Education, Tech=Technology, Inc=Increase, Dec=Decrease. Structure your answer as Topic + Main Points + Conclusion, using a template like: 'The lecture discussed ___. The speaker explained ___ and highlighted ___, concluding that ___.' Response must be more than 50 and fewer than 70 words (51-69 words is the safe range), written as a coherent single paragraph — not bullet points, not all capitals. You get 10 minutes, the audio plays only once (no pause/replay). Marks breakdown: Content 4, Form 2, Grammar 2, Vocabulary 2, Spelling 2 — focus on including the important information and showing understanding of the main ideas, following the word limit, using accurate grammar (tenses, articles, prepositions, agreement), appropriate/varied vocabulary, and careful spelling. Under 40 words or over 100 words scores 0 for Form; two or more spelling errors scores 0 for spelling.",
+    "priority": 5
+  },
+  {
+    "topic": "listening.multiple-choice.strategy",
+    "tags": ["listening", "multiple choice", "strategy"],
+    "question": "How do I approach Listening Multiple Choice questions?",
+    "content": "Focus on understanding the speaker's purpose, attitude, and main idea — do not focus on every single word, listen for overall meaning. Read the answer options quickly before the audio starts if possible, then listen for paraphrases of the options (not exact wording matches) and for tone shifts in the speaker's voice. Eliminate options that are clearly wrong. Trap alert: similar wording does not mean correct meaning — an option can reuse words from the audio while still being the wrong answer.",
+    "priority": 3
+  },
+  {
+    "topic": "listening.fill-in-blanks.strategy",
+    "tags": ["listening", "fill in the blanks", "strategy", "prediction"],
+    "question": "How do I approach Listening Fill in the Blanks?",
+    "content": "Before the audio plays, predict what type of word is needed in each blank — noun, verb, adjective, or adverb. Example: 'The company plans to ___ production.' — this needs a verb, and the correct answer is 'increase'. While listening, focus especially on collocations (e.g. 'make a decision') and grammar clues (subject-verb agreement, correct tense usage) to confirm your prediction.",
+    "priority": 4
+  },
+  {
+    "topic": "listening.highlight-correct-summary.strategy",
+    "tags": ["listening", "highlight correct summary", "strategy"],
+    "question": "How do I approach Highlight Correct Summary?",
+    "content": "Read all the answer options first, before listening. While listening, identify the topic, the key arguments, and the conclusion. Choose the option that covers ALL the major ideas of the talk — not an option that is accurate but only captures one small detail.",
+    "priority": 3
+  },
+  {
+    "topic": "listening.highlight-incorrect-words.strategy",
+    "tags": ["listening", "highlight incorrect words", "strategy", "difficult"],
+    "question": "How do I approach Highlight Incorrect Words — it's the hardest listening task for me?",
+    "content": "Highlight Incorrect Words is widely considered the most difficult listening task. Strategy: read the on-screen transcript ahead of/during the audio, follow it visually word by word, listen meaningfully (not just passively), and mark any word where what you hear differs from what's printed on screen. Example: transcript shows 'economic' but the audio actually says 'financial' — mark 'economic' as incorrect, since the printed word doesn't match what was actually said.",
+    "priority": 4
+  },
+  {
+    "topic": "listening.write-from-dictation.strategy",
+    "tags": ["listening", "write from dictation", "dictation", "strategy", "most important", "high scoring"],
+    "question": "Why does Write From Dictation matter so much, and how do I approach it?",
+    "content": "Write From Dictation is considered the single most important listening task and one of the highest-scoring item types — invest serious practice time here. It simultaneously tests listening, spelling, grammar, and vocabulary. Technique: break the sentence into natural chunks while listening, e.g. 'The increasing use | of technology | is changing | the modern workplace.' Learn common grammar patterns so you can reconstruct sentences accurately: Article+Noun (the project, a company, an organization), Adjective+Noun (economic growth, global warming, scientific research), Verb+Noun (conduct research, make decisions, reach conclusions). Each correctly spelled word in the correct position earns a point; an incorrect or misspelled word earns zero for that word.",
+    "priority": 5
+  },
+  {
+    "topic": "listening.overview.format",
+    "tags": ["listening", "overview", "format", "duration", "question types"],
+    "question": "What does the PTE Listening section actually test and how long does it take?",
+    "content": "The PTE Listening section lasts approximately 30-43 minutes and includes 8 question types. It tests: listening comprehension, note-taking, vocabulary, grammar, and spelling — understanding academic English in real-life contexts, not just hearing individual words.",
+    "priority": 3
+  },
+  {
+    "topic": "listening.note-taking.symbols-method",
+    "tags": ["listening", "note taking", "symbols", "shorthand", "abbreviations"],
+    "question": "What shorthand symbols should I use for listening note-taking?",
+    "content": "Active listening means analysing meaning, not just hearing — identify the main idea, supporting details, and the speaker's attitude while you listen. Use symbols instead of full sentences when taking notes: ↑ = increase, ↓ = decrease, → = leads to, w/ = with, + = positive/benefit, — = negative/problem, ? = question/problem, = = same as, ∴ = therefore/so. Common abbreviations: gov=government, env=environment, tech/edu/soc=technology/education/society. Write keywords only, never full sentences — you will fall behind the audio if you try to write complete thoughts.",
+    "priority": 4
+  },
+  {
+    "topic": "listening.grammar.advanced-for-listening",
+    "tags": ["listening", "grammar", "sentence structure", "tense", "traps"],
+    "question": "What grammar should I focus on for Listening tasks?",
+    "content": "Sentence structures: simple (Subject + Verb), complex (using clauses with although, because, while). Tense awareness: past tense signals a completed action, present tense signals a general fact, future tense signals a prediction. Common grammar traps to watch for while transcribing: articles (a/an/the), prepositions (in/on/at), and plurals (student vs students) — these are exactly the kind of small details Write From Dictation and Fill in the Blanks test.",
+    "priority": 3
+  },
+  {
+    "topic": "listening.practice.dos-and-donts",
+    "tags": ["listening", "practice", "tips", "vocabulary", "paraphrasing"],
+    "question": "What should I actually do (and avoid) when practising PTE Listening?",
+    "content": "Do: practise dictation daily, practise with different accents (British, Australian, American), use subtitles at first then remove them as you improve, try shadow listening (repeating after the audio), and focus on clarity over speed. Don't: skip daily dictation practice, write excessively long summaries, ignore spelling mistakes, or focus only on individual words instead of overall meaning. Vocabulary/paraphrasing tip: train your brain to recognise meaning, not exact words — e.g. increase can appear in the audio as rise, grow, or expand; important can appear as crucial or essential.",
+    "priority": 3
+  },
+  {
+    "topic": "vocabulary.band8.importance-impact",
+    "tags": ["vocabulary", "band 8", "importance", "impact", "word list"],
+    "content": "Words for expressing the essential nature of an idea: vital, significant, paramount, fundamental, influential, meaningful, considerable, profound. Use these to show you understand what truly matters in an argument, not just that something is 'important'.",
+    "priority": 3
+  },
+  {
+    "topic": "vocabulary.band8.change-development",
+    "tags": ["vocabulary", "band 8", "change", "development", "word list"],
+    "content": "Verbs for describing positive transformations, from smaller to larger scale change: enhance, improve (making something better); transform, develop, expand (larger-scale change); evolve, progress, advance, modernize, upgrade (movement forward over time).",
+    "priority": 3
+  },
+  {
+    "topic": "vocabulary.band8.cause-effect",
+    "tags": ["vocabulary", "band 8", "cause and effect", "linking words", "word list"],
+    "content": "Phrases connecting actions to results: therefore, consequently, as a result (directly link cause and effect); hence, due to, because of (explain the reason behind something); lead to, result in, contribute to, trigger (show how actions create consequences).",
+    "priority": 3
+  },
+  {
+    "topic": "vocabulary.band8.opinion-argument",
+    "tags": ["vocabulary", "band 8", "opinion", "argument", "essay", "word list"],
+    "content": "Phrases for expressing a viewpoint with confidence, useful in Essay and Describe Image: 'I believe' / 'in my opinion' (personalize your stance); 'from my perspective' (a unique viewpoint); 'it is widely believed' / 'it is evident that' (common viewpoints); 'there is no doubt' / 'I strongly agree' / 'I partially agree' (clarify conviction); 'this suggests that' / 'this indicates' (evidence-based insight).",
+    "priority": 3
+  },
+  {
+    "topic": "vocabulary.band8.advantages-disadvantages",
+    "tags": ["vocabulary", "band 8", "advantages", "disadvantages", "pros and cons", "word list"],
+    "content": "Precise language for pros and cons: benefit, advantage (positive aspects); drawback, disadvantage, limitation (negative aspects); risk, opportunity (potential outcomes); challenge (difficulties); positive impact, negative impact (succinct effect description).",
+    "priority": 3
+  },
+  {
+    "topic": "vocabulary.band8.frequency-degree",
+    "tags": ["vocabulary", "band 8", "frequency", "degree", "word list"],
+    "content": "Words for precision around how often or how much: frequently, occasionally (common occurrences); rarely (uncommon events); gradually, rapidly (speed of change); significantly, slightly, completely, highly, extremely (degree to which something is present).",
+    "priority": 2
+  },
+  {
+    "topic": "vocabulary.band8.education-topic",
+    "tags": ["vocabulary", "band 8", "education", "topic vocabulary", "word list"],
+    "content": "Essential vocabulary for discussing education topics (common in Essay, SGD, Retell Lecture): curriculum, academic performance, practical skills, higher education, qualification, knowledge, training, assessment, learning environment, critical thinking.",
+    "priority": 3
+  },
+  {
+    "topic": "vocabulary.band8.technology-society",
+    "tags": ["vocabulary", "band 8", "technology", "society", "topic vocabulary", "word list"],
+    "content": "Critical vocabulary for technology/society topics: technology, innovation, automation (technical advancement); artificial intelligence, digital communication, social media, online platforms, cybersecurity, data privacy, global connectivity (impact of technology on society).",
+    "priority": 3
+  },
+  {
+    "topic": "vocabulary.band8.environment-global-issues",
+    "tags": ["vocabulary", "band 8", "environment", "climate change", "topic vocabulary", "word list"],
+    "content": "Key terms for environmental/global-issue topics: climate change, pollution, renewable energy, sustainable, natural resources, environmental protection, conservation, global warming, waste management, eco-friendly.",
+    "priority": 3
+  },
+  {
+    "topic": "vocabulary.band8.work-lifestyle",
+    "tags": ["vocabulary", "band 8", "work", "lifestyle", "topic vocabulary", "word list"],
+    "content": "Vocabulary for discussing modern work dynamics: work-life balance, job satisfaction, career growth, professional development, productivity, workplace, income, employment, unemployment, financial stability.",
+    "priority": 3
+  },
+  {
+    "topic": "scoring.overview.how-scoring-works",
+    "tags": ["scoring", "overall score", "how pte is scored", "score calculation"],
+    "question": "How is my PTE Overall score actually calculated?",
+    "content": "PTE Academic combines automated scoring with expert human assessment. It reports an Overall score (10-90) and four communicative skill scores — Listening, Reading, Speaking, Writing (10-90 each). Test takers complete 65-75 questions; each is scored either correct/incorrect (1 point or 0) or on partial credit (a range of points based on response quality). The scoring model is NOT a simple sum of question points — it uses three inputs: (1) question scores — the points achieved, (2) question difficulty — determined through extensive pre-testing, which allows fair comparison even though every test-taker gets a different set of questions, and (3) question weighting — how much each question type contributes to each score, designed to reflect real-world communication importance. The Overall score and each skill score are calculated independently of each other, based on all the questions relevant to that score — the Overall score is NOT an average of the four skill scores, which is the single most common misunderstanding about PTE scoring.",
+    "priority": 5
+  },
+  {
+    "topic": "scoring.gatekeepers.content-and-form",
+    "tags": ["scoring", "gatekeeper", "content", "form", "zero score", "essay", "swt"],
+    "question": "Why did I get a zero on my essay even though my grammar was fine?",
+    "content": "For extended Speaking and Writing responses, Content and Form act as 'gatekeepers'. If a response scores 0 for Content or 0 for Form, it receives ZERO points for the ENTIRE question — no other trait score (grammar, vocabulary, spelling, etc.) matters once this happens. Examples of automatic zero: an essay written on a completely different topic from the prompt (0 for Content); an essay under 120 words (0 for Form, since Write Essay needs 200-300 words, with 120-199 or 301-380 scoring partial credit and anything outside that range scoring 0); a response that relies heavily on pre-prepared/memorised material instead of actually addressing the prompt (0 for Content). This is why word count and genuinely answering the actual prompt matter more than almost anything else.",
+    "priority": 5
+  },
+  {
+    "topic": "scoring.weighting.question-type-table",
+    "tags": ["scoring", "weighting", "question types", "which questions matter most"],
+    "question": "Which PTE question types are worth the most marks?",
+    "content": "Approximate weighting of each question type toward Overall and skill scores (from Pearson's own scoring documentation): Describe Image 15% Overall / 31% Speaking. Write Essay 7% Overall / 31% Writing. Summarize Written Text 7% Overall / 23% Reading / 28% Writing. Summarize Group Discussion 9% Overall / 20% Listening / 19% Speaking. Repeat Sentence 7% Overall / 17% Listening / 16% Speaking. Retell Lecture 6% Overall / 13% Listening / 13% Speaking. Respond to a Situation 6% Overall / 13% Speaking. Fill in the Blanks (Dropdown, Reading) 7% Overall / 25% Reading. Fill in the Blanks (Drag and Drop, Reading) 6% Overall / 20% Reading. Write from Dictation 5% Overall / 13% Listening / 23% Writing. Summarize Spoken Text 4% Overall / 10% Listening / 18% Writing. Highlight Incorrect Words 4% Overall / 8% Listening / 13% Reading. Read Aloud 4% Overall / 9% Speaking. Reorder Paragraph 3% Overall / 9% Reading. Fill in the Blanks (Type In, Listening) 3% Overall / 8% Listening. Answer Short Question 2% Overall / 4% Listening. Multiple Choice Multiple Answers (Reading) 1% Overall / 5% Reading. Multiple Choice Multiple Answers (Listening) 1% Overall / 3% Listening. Select Missing Word 1% Overall / 1% Listening. Highlight Correct Summary <1% Overall / 2% Listening / 3% Reading. Multiple Choice Single Answer (Reading/Listening) <1% Overall / 2-3% of relevant skill. Important: these weightings cannot be used to predict an exact score — the scoring model also factors in question difficulty, so treat this as a guide to where to focus practice time, not a calculator.",
+    "priority": 4
+  },
+  {
+    "topic": "scoring.misconceptions.common-myths",
+    "tags": ["scoring", "myths", "misconceptions", "overall score", "skills profile"],
+    "question": "What are the most common misunderstandings about PTE scoring?",
+    "content": "Myth 1: 'My Overall score is the average of my 4 skill scores.' FALSE — Overall is calculated independently across ALL questions; a test-taker can score 90 Overall with 69 in Reading. Myth 2: 'If I score 90 Overall, all my skill scores must be 90.' FALSE — you can achieve 90 Overall with especially strong performance on the highest-weighted questions without hitting 90 in every single skill. Myth 3: 'The Skills Profile bars show my actual score.' FALSE — the Skills Profile only shows relative strengths/weaknesses as a diagnostic tool; a full bar does not mean 90, and a 90 score doesn't guarantee a full bar. Myth 4: 'I can predict my exact score from the weighting table.' FALSE — the model also factors in question difficulty, so weightings alone can't calculate a score. Myth 5: 'If my score changes after a rescore, the original score was wrong.' FALSE — rescore differences reflect normal variation in human judgment across many extended responses; the original AI+human scoring is still considered accurate. Myth 6: 'Incorrect answers make you lose points below zero.' FALSE — the lowest possible score for any single question is zero; in 'select all that apply' style questions you lose a point per wrong option chosen but the total for that question never goes negative.",
+    "priority": 4
+  },
+  {
+    "topic": "scoring.rescore.process",
+    "tags": ["scoring", "rescore", "appeal", "retake", "human rater"],
+    "question": "How does a PTE rescore actually work, and should I request one?",
+    "content": "If a candidate requests a rescore, the ENTIRE test's open-ended responses are re-evaluated, entirely by human raters (unlike the original scoring, which combines automation with human evaluation). Each extended response is independently reviewed by two human raters; if they disagree, a third expert rater adjudicates. Multiple-choice/closed questions with definitive correct answers are NOT rescored. The rescore completely REPLACES the original score report — scores are never averaged or combined with the old ones. A rescore can go up, down, or stay the same, and it is impossible to predict the outcome in advance. Only ONE rescore is permitted per test attempt, and it is final. Score changes after a rescore do not mean the original scoring was wrong — small differences in how each human rater scores each trait can add up across a whole test. No additional feedback or question-level reasoning is given about why a score changed, to protect test security. Before requesting a rescore, honestly ask: did I speak clearly, cover all the content, and write genuine (not memorised/templated) responses? In most cases the original AI+human scoring is accurate.",
+    "priority": 4
+  },
+  {
+    "topic": "guidance.post-results-services",
+    "tags": ["guidance", "rescore", "appeal", "technical review", "post-results"],
+    "question": "What's the difference between a technical review, a rescore, and an appeal?",
+    "content": "Pearson offers three post-results services, each checking a different thing: (1) Technical review — checks for technical issues in audio recordings that may have affected scoring; if issues are found, both the test fee and the review fee are refunded; this service does NOT change scores. (2) Human rescore — the entire test's open-ended responses are rescored by human raters only, and the new score completely replaces the original; scores can go up, down, or stay the same; only one rescore allowed per test sitting; no feedback on individual responses is given. (3) Appeal — only confirms that the rescoring process itself was followed correctly according to Pearson's internal procedures; it does NOT re-assess test responses or explain why individual scores changed.",
+    "priority": 3
+  },
+  {
+    "topic": "guidance.booking.exam-steps",
+    "tags": ["guidance", "booking", "exam booking", "passport", "myPTE", "how to book"],
+    "question": "How do I book my PTE Academic exam?",
+    "content": "Steps to book: (1) Visit pearsonpte.com — the official PTE website — and click 'Book a test' or 'Check availability'. (2) Create a myPTE account, or log in if you already have one. (3) Select a test centre by searching location, date, and time. (4) Review ALL your personal details one final time before submitting. (5) Complete payment online (credit/debit card accepted). (6) Save your booking confirmation email. (7) Arrive 30 minutes early with your passport only. Two critical rules: your profile name MUST exactly match your passport — every letter, space, and middle name; any mismatch results in refused entry with NO refund, so double-check before submitting. Your PASSPORT is the ONLY accepted ID at all PTE test centres — no passport means no exam and no refund, with no exceptions.",
+    "priority": 5
+  },
+  {
+    "topic": "guidance.anti-template-policy",
+    "tags": ["guidance", "anti-template", "memorised answers", "pearson policy", "templates"],
+    "question": "Is it risky to use memorised templates/structures in PTE Speaking and Writing?",
+    "content": "Pearson has an official Anti-Template Policy. Templates/structures in this training are meant to teach thinking frameworks, not to be copy-pasted word-for-word as memorised scripts — doing so risks being flagged and scored zero for Content (significant amounts of pre-prepared/memorised material is explicitly listed as a reason for a Content score of 0). Use structures as a flexible skeleton for organising your own ideas about the actual prompt in front of you, never as a fixed script to recite regardless of the question.",
+    "priority": 5
+  },
+  {
+    "topic": "scoring.rubric.read-aloud",
+    "tags": ["scoring", "rubric", "read aloud", "oral fluency", "pronunciation"],
+    "question": "How is Read Aloud scored?",
+    "content": "Read Aloud has no separate content score — you're reading text that's already given to you. It's scored on Oral Fluency and Pronunciation only, each on a 0-5 band: 5 Highly proficient, 4 Advanced, 3 Good, 2 Intermediate, 1 Limited/Intrusive, 0 Disfluent/Non-English. You'll have roughly 35-40 seconds to prepare and about 40-45 seconds to read aloud. Focus on smooth, natural delivery rather than speed — avoid unnecessary pauses, hesitations, repetitions, and self-corrections. Use prep time to spot difficult words, punctuation, and natural pause points.",
+    "priority": 4
+  },
+  {
+    "topic": "scoring.rubric.repeat-sentence",
+    "tags": ["scoring", "rubric", "repeat sentence", "content", "pronunciation", "oral fluency"],
+    "question": "How is Repeat Sentence scored?",
+    "content": "Repeat Sentence is scored on Content, Pronunciation, and Oral Fluency (each a trait with its own band), and it contributes to BOTH Listening and Speaking scores, making it one of the highest-impact question types overall. Content scoring: 3 points if all words from the prompt appear in the response in the correct sequence; 2 points if at least 50% of words are correct and in sequence; 1 point if less than 50%; 0 if almost nothing from the prompt is captured. Hesitations and pauses are ignored for Content scoring specifically. You hear each sentence only once with no pause/replay; start speaking promptly after the beep. Do not add extra words, filler phrases ('something like that', 'I think'), or invented content — if you can't remember the whole sentence, repeat as much accurate content as you captured, clearly and fluently, rather than sacrificing fluency to guess at missing words.",
+    "priority": 5
+  },
+  {
+    "topic": "scoring.rubric.describe-image",
+    "tags": ["scoring", "rubric", "describe image", "content bands"],
+    "question": "How is Describe Image scored, band by band?",
+    "content": "Describe Image is scored on Content (0-6), Pronunciation (0-5), and Oral Fluency (0-5). Content bands: 6 = describes the image fully and accurately, expands on relationships between features for a nuanced interpretation, varied vocabulary used with ease and precision — a listener could build a complete mental picture. 5 = describes main features accurately, identifies some relationships without expanding on them in detail, minor details missing. 4 = some accurate simple descriptions and basic relationships but doesn't cover all main features; basic vocabulary with some repetition. 3 = mainly superficial descriptions with minor inaccuracies; narrow vocabulary repeated. 2 = minimal superficial descriptions with some inaccuracies; very limited vocabulary. 1 = disconnected elements or a list of points with no real description. 0 = relevant to the prompt but too limited to score higher.",
+    "priority": 4
+  },
+  {
+    "topic": "scoring.rubric.retell-lecture",
+    "tags": ["scoring", "rubric", "retell lecture", "content bands"],
+    "question": "How is Retell Lecture scored, band by band?",
+    "content": "Retell Lecture is scored on Content (0-6), Pronunciation (0-5), Oral Fluency (0-5), counting toward Listening and Speaking. Content bands: 6 = clear, accurate, full comprehension, paraphrases main ideas seamlessly in own words with specificity, ideas well connected and logically sequenced. 5 = clear, captures main ideas and some important details, formulated mostly in own words with minor inconsistencies. 4 = captures some main ideas but may include inaccuracies or focus on less important details, only partial reformulation in own words, ideas not well connected. 3 = captures some ideas but may not differentiate important points from details, may include repetition of lecture language without reformulation. 2 = mostly inaccurate/incomplete, heavy reliance on repeating lecture language, lacks coherence. 0 = related to the lecture but too limited to score higher. Key lesson across every band: reformulating ideas in YOUR OWN WORDS consistently scores higher than repeating the lecture's exact wording.",
+    "priority": 4
+  },
+  {
+    "topic": "scoring.rubric.summarize-group-discussion",
+    "tags": ["scoring", "rubric", "summarize group discussion", "sgd", "content bands"],
+    "question": "How is Summarize Group Discussion scored, band by band?",
+    "content": "Summarize Group Discussion is scored on Content (0-6), Pronunciation, Oral Fluency, counting toward both Listening and Speaking. Content bands: 6 = full comprehension, paraphrases main ideas seamlessly, expands on each speaker's contribution with specificity, explores relationships between viewpoints and synthesises perspectives effectively. 5 = accurately captures main ideas and some details per speaker, notes some relationships between viewpoints, minor gaps. 4 = captures main ideas and some per-speaker details but may include inaccuracies, focuses more on individual perspectives than relationships between them. 3 = captures some ideas but misses substance/direction of the full conversation, narrow vocabulary, mainly unconnected ideas. 2 = mostly inaccurate/incomplete, relies on repeating discussion language, lacks coherence. 0 = relevant but too limited to score higher. Always represent all three speakers' contributions AND the relationships between them (agree/disagree/add to) — not just three separate summaries.",
+    "priority": 4
+  },
+  {
+    "topic": "scoring.rubric.respond-to-situation",
+    "tags": ["scoring", "rubric", "respond to a situation", "content bands"],
+    "question": "How is Respond to a Situation scored, band by band?",
+    "content": "Respond to a Situation is scored on Content (0-6), Pronunciation, Oral Fluency. Content bands: 6 = deals with the situation effectively, fully accomplishes the primary communication goal, considers the full context, communicates with ease/flexibility/precision, situationally appropriate and persuasive. 5 = deals with the situation adequately, accomplishes the goal with only minor omissions. 4 = partially accomplishes the goal with some omissions/misinterpretations, some limitations of expression. 3 = partially accomplishes only the most basic aspect of the goal, limited range of expression, may repeat prompt language without reformulation. 2 = relevant content but doesn't achieve the primary communication goal. 1 = relevant content but a clear lack of understanding of the situation, or only minimally addresses the prompt with no elaboration. 0 = relevant but too limited to score higher. The real test here is whether you actually solved the communication problem presented — not just whether you spoke fluently about the topic.",
+    "priority": 4
+  },
+  {
+    "topic": "scoring.rubric.summarize-written-text",
+    "tags": ["scoring", "rubric", "summarize written text", "swt", "content bands", "form"],
+    "question": "How is Summarize Written Text scored, band by band?",
+    "content": "Summarize Written Text is scored on Content (0-4), Form (0-1), Grammar (0-2), Vocabulary (0-2), counting toward Reading and Writing. Content bands: 4 = comprehensive summary, full comprehension, effective paraphrasing, extraneous details removed, all main ideas correctly identified and synthesised concisely. 3 = adequate summary, good comprehension, paraphrasing used but not always consistently, main ideas identified with minor omissions. 2 = partial summary, basic comprehension, no clear discernment between main points and peripheral detail, relies heavily on repeating source-text excerpts. 1 = relevant but not meaningfully summarised, limited comprehension, disconnected ideas/excerpts without synthesis. 0 = too limited to score higher, no comprehension shown. Form: must be written as ONE single complete sentence, 5-75 words — anything else (not one sentence, under 5 or over 75 words, or written in capital letters) scores 0 for Form, which zeroes the whole question regardless of content quality. Ideal length is 35-50 words.",
+    "priority": 5
+  },
+  {
+    "topic": "scoring.rubric.write-essay",
+    "tags": ["scoring", "rubric", "write essay", "essay", "content bands", "form", "linguistic range"],
+    "question": "How is Write Essay scored, band by band?",
+    "content": "Write Essay is scored on six traits: Content (0-6), Form (0-2), Development/Structure/Coherence (0-6), General Linguistic Range (0-6), Vocabulary Range (0-2), Grammar (0-2), Spelling (0-2) — all counting toward Writing. Content: 6 = fully addresses the prompt in depth, reformulates the issue seamlessly in own words, argument supported convincingly with relevant examples throughout. Lower bands progressively address the prompt more superficially, down to 0 if the essay doesn't properly deal with the prompt at all. Form: 2 = 200-300 words; 1 = 120-199 or 301-380 words; 0 = under 120 or over 380 words, OR written in all capitals/no punctuation/only bullet points or very short sentences — this zeroes the entire question. Development/Structure/Coherence: 6 = effective logical structure, flows smoothly, clear cohesive argument with well-developed intro/conclusion and logically sequenced paragraphs, varied connective devices used effectively. General Linguistic Range: 6 = varied expressions and vocabulary used with ease and precision, no signs of restriction. Grammar: 2 = consistent control of complex language with rare, hard-to-spot errors. Spelling: 2 = correct, 1 = one error, 0 = more than one error.",
+    "priority": 5
+  },
+  {
+    "topic": "scoring.rubric.summarize-spoken-text",
+    "tags": ["scoring", "rubric", "summarize spoken text", "sst", "content bands", "form"],
+    "question": "How is Summarize Spoken Text scored, band by band?",
+    "content": "Summarize Spoken Text is scored on Content (0-4), Form (0-2), Grammar (0-2), Vocabulary (0-2), Spelling (0-2), counting toward Listening and Writing. Content bands mirror Summarize Written Text: 4 = comprehensive, full comprehension, effective paraphrasing, main ideas synthesised concisely; descending to 0 if the response shows no comprehension of the source text. Form: 2 = 50-70 words; 1 = 40-49 or 71-100 words; 0 = under 40 or over 100 words, or written in capitals/no punctuation/only bullet points — zeroes the question. You get 10 minutes, the audio plays only once.",
+    "priority": 4
+  },
+  {
+    "topic": "scoring.rubric.reading-question-types",
+    "tags": ["scoring", "rubric", "reading", "fill in the blanks", "multiple choice", "reorder paragraph"],
+    "question": "How are Reading's shorter question types scored (Fill in the Blanks, MCQ, Reorder Paragraph)?",
+    "content": "Fill in the Blanks (Dropdown): partial credit, 1 point for each correctly completed blank. Fill in the Blanks (Drag and Drop): same, 1 point per correctly completed blank. Multiple Choice Multiple Answers: 1 point for each correct response chosen, MINUS 1 point for each incorrect option chosen — but the total for the question never goes below 0. Reorder Paragraph: 1 point for each pair of correct adjacent textboxes/sentences ordered correctly (not all-or-nothing — partial reordering still earns partial credit). Multiple Choice Single Answer: correct/incorrect, 1 or 0.",
+    "priority": 3
+  },
+  {
+    "topic": "scoring.rubric.listening-question-types",
+    "tags": ["scoring", "rubric", "listening", "fill in the blanks", "highlight", "write from dictation"],
+    "question": "How are Listening's shorter question types scored?",
+    "content": "Multiple Choice Multiple Answers (Listening): 1 point per correct response, minus 1 per incorrect, never below 0. Fill in the Blanks (Type In): 1 point for each word correctly spelled in the blank. Highlight Correct Summary: correct/incorrect, 1 or 0. Multiple Choice Single Answer (Listening): correct/incorrect, 1 or 0. Select Missing Word: correct/incorrect, 1 or 0. Highlight Incorrect Words: 1 point per correctly identified word, minus 1 per incorrect choice. Write from Dictation: 1 point for each word that is both correct AND correctly spelled; 0 for each incorrect or misspelled word.",
+    "priority": 3
+  },
+  {
+    "topic": "speaking.read-aloud.basics",
+    "tags": ["speaking", "read aloud", "basics", "timing", "fluency"],
+    "content": "Usually around 5-6 Read Aloud questions, generally short/manageable passages. You get about 35 seconds to prepare before the recording begins, then about 40-45 seconds to read the passage aloud. No separate content marks — you're reading text already given to you, so performance depends mainly on Oral Fluency and Pronunciation. Focus on smooth, natural delivery rather than speed; avoid unnecessary pauses, hesitations, repetitions, self-corrections. Use prep time to spot difficult words, punctuation, and good places to pause. Read in meaningful phrases — clear pronunciation plus steady fluency matters more than rushing.",
+    "priority": 4
+  },
+  {
+    "topic": "speaking.repeat-sentence.basics",
+    "tags": ["speaking", "repeat sentence", "basics", "tips"],
+    "content": "Usually 10-12 Repeat Sentence questions — a major contributor to overall performance since it counts toward both Speaking and Listening, so it deserves serious practice time. Each sentence plays only once, no pause/replay. Start speaking promptly after the beep. Try to repeat exactly what you heard, same words and order. Never add extra words or filler phrases ('something like that', 'I think', 'I'm not sure'). Scored on Content, Oral Fluency, Pronunciation. Even if you can't remember the whole sentence, repeat as much accurate content as you captured, clearly and confidently — don't sacrifice fluency by inventing words to fill gaps.",
+    "priority": 4
+  },
+  {
+    "topic": "speaking.retell-lecture.templates",
+    "tags": ["speaking", "retell lecture", "template", "structure"],
+    "question": "Is there a template for Retell Lecture?",
+    "content": "Usually 2-3 questions. The audio plays once, no pause/replay — focus on main ideas and key phrases, not every word. After the audio, you get 10 seconds to organise (not invent new content), then up to 40 seconds to respond — a clear, well-organised shorter answer beats a padded full-length one. Template: 'The lecture mainly focused on [topic]. The key areas mentioned were [point 1] and [point 2], and the speaker also discussed [point 3]. Additionally, he highlighted that [factor 1], as well as [factor 2], can have a significant impact on [area/topic]. Finally, he concluded by stating that [final idea] has a direct link to [topic].' Example (climate change topic): 'The topic was about climate change. The speaker mainly discussed rising global temperatures and increasing carbon emissions. He mentioned the use of fossil fuels and rapid deforestation as major causes. Additionally, extreme weather conditions, rising sea levels and environmental damage were highlighted. Finally, the speaker emphasized renewable energy, government policies and individual responsibility as important solutions to reduce the effects of climate change.'",
+    "priority": 4
+  },
+  {
+    "topic": "speaking.summarize-group-discussion.structure",
+    "tags": ["speaking", "summarize group discussion", "sgd", "template", "structure"],
+    "question": "What's a good response structure for Summarize Group Discussion?",
+    "content": "SGD contributes to both Speaking and Listening, scored mainly on Content, Pronunciation, Oral Fluency. You hear a roughly 2-minute, 3-speaker discussion only once — note-taking is critical. What to include: the main topic, the main points from all three speakers (not just one or two), and the relationships between speakers (agree, add to, support, or disagree). Recommended flow: Topic → Speaker 1 → Speaker 2 + relationship to Speaker 1 → Speaker 3 + relationship → overall summary. Structure template: 'The speakers discussed [main topic] and shared different views regarding the issue. The first speaker said that [main point]... The second speaker added that [main point]. The speaker agreed with the first speaker and said that [agreement]. However, the speaker also mentioned [different point]. The third speaker pointed out that [main point] and added that [supporting detail]... Overall, the speakers discussed [topic], focusing mainly on [key idea 1], [key idea 2] and [key idea 3].' Sound natural — explain it the way you'd actually tell a friend what three people discussed and how their ideas connected, not like a transcript.",
+    "priority": 4
+  },
+  {
+    "topic": "speaking.describe-image.structures",
+    "tags": ["speaking", "describe image", "bar chart", "line graph", "pie chart", "table", "template"],
+    "question": "What's the structure for describing a bar chart, line graph, pie chart, or table?",
+    "content": "First identify the image type, then use the most suitable structure — don't force one template onto every image. Four-sentence structure for bar/pie/line/table: (1) TOPIC — 'The given bar graph illustrates [TOPIC], with the main categories including [CATEGORY 1] and [CATEGORY 2], measured in [units].' (2) HIGHEST & LOWEST — state which category records the highest and lowest figures. (3) ADDITIONAL COMPARISON — note a similar pattern between two categories, or compare two specific values directly. (4) CONCLUSION — 'Overall, the graph shows noticeable differences among the given categories.' Useful comparison phrases: 'X stands at ___, compared with ___ for Y'; 'X records ___, while Y accounts for ___'; 'X is slightly higher than Y, at ___ and ___ respectively'; 'X is nearly twice as high as Y'; 'X has the highest figure at ___, followed by Y at ___.' Don't waste speaking time reading out every single number — select the most useful figures and comparisons only.",
+    "priority": 5
+  },
+  {
+    "topic": "speaking.describe-image.map-vocabulary",
+    "tags": ["speaking", "describe image", "world map", "map", "vocabulary"],
+    "question": "How do I describe a world map in Describe Image?",
+    "content": "Template when the map shows limited labelled information: 'The given image presents a world map showing different geographical regions. Specifically, the map is divided into several areas using different colours and shades. Some regions appear lighter, whereas others are displayed in darker shades... Overall, the image provides a clear visual representation of the geographical distribution of the highlighted areas.' Template when countries/regions ARE labelled: name the regions and their colours/shades directly. Useful map vocabulary: distribution, geographical distribution, distributed across, spread across, concentrated in, mainly located in, found in, observed in, covers, located across, majority, minority, significant, approximately, relatively, predominantly, continent, country, region, northern/southern/eastern/western/central, coastal, worldwide, globally. Caution: never interpret a darker or lighter colour as a higher or lower value unless the legend explicitly tells you what the colours represent.",
+    "priority": 3
+  },
+  {
+    "topic": "speaking.describe-image.process-flowchart-structure",
+    "tags": ["speaking", "describe image", "process diagram", "flowchart", "template"],
+    "question": "How do I describe a process diagram or flowchart?",
+    "content": "Template: 'The given flowchart illustrates the process of [TOPIC], which consists of several stages. The process begins with [STAGE 1], followed by [STAGE 2] and [STAGE 3]. In the next stage, [STAGE 4] takes place, which leads to [STAGE 5]. Subsequently, [STAGE 6] occurs before reaching [STAGE 7]. Finally, the process ends with [FINAL STAGE/OUTCOME]. Overall, the diagram provides a clear overview of the entire process from [STARTING POINT] to [FINAL OUTCOME].' Easy sentence patterns: 'A is followed by B.' / 'A leads to B, which then results in C.' / 'Following this, the process moves to D.' / 'At this point, the process is divided into A and B.' / 'The process concludes with D.'",
+    "priority": 3
+  },
+  {
+    "topic": "speaking.describe-image.layout-map-structure",
+    "tags": ["speaking", "describe image", "layout map", "floor plan", "template"],
+    "question": "How do I describe a layout/floor-plan map?",
+    "content": "Template: 'The given layout illustrates [PLACE/TOPIC], highlighting several key areas, including [A], [B] and [C]. In terms of location, [A] is situated [LOCATION], while [B] is located [LOCATION]. Additionally, [C] can be seen next to/opposite/between [D], whereas [E] is positioned [LOCATION]. Overall, the image provides a clear overview of the arrangement and location of different areas within [PLACE].' Useful location structures: 'A is located next to B, while C is situated opposite D.' / 'A is positioned between B and C.' / 'A can be seen in the centre, surrounded by B and C.' / 'A is situated on the left-hand side, whereas B is located on the right.'",
+    "priority": 3
+  },
+  {
+    "topic": "speaking.describe-image.general-image-structure",
+    "tags": ["speaking", "describe image", "photo", "general image", "template"],
+    "question": "How do I describe a general photo/scene image?",
+    "content": "Five-part structure: (1) TOPIC — 'The given image illustrates [TOPIC/SCENE/PLACE].' (2) MAIN PEOPLE/OBJECTS — list the main visible features. (3) ACTIONS — describe what people are doing. (4) ADDITIONAL DETAILS — background/foreground features. (5) CONCLUSION — 'Overall, the image presents a clear view of [MAIN SCENE/TOPIC].' Worked example (public park): 'The given image illustrates a busy public park. The main features visible in the image include several people, trees, benches, bicycles and a walking path. In terms of activities, some people are walking along the path, while others are sitting on benches and talking. Additionally, a man can be seen riding a bicycle. In the background, several trees and buildings are visible. Overall, the image presents a lively outdoor environment.' Common mistakes to avoid: listing observations without connecting them, repeating 'we can see that' throughout, stopping too early without covering all main features, only describing one part of the image.",
+    "priority": 3
+  },
+  {
+    "topic": "listening.summarize-spoken-text.marks-breakdown",
+    "tags": ["listening", "summarize spoken text", "sst", "marks", "word count"],
+    "question": "How many words should my Summarize Spoken Text answer be, and how are marks split?",
+    "content": "One question from this section. Response should be more than 50 and fewer than 70 words (51-69 is the safe target). You get 10 minutes total; the audio plays only once, no pause/replay. Marks breakdown: Content 4 (include important information, show understanding of main ideas), Form 2 (follow the word limit), Grammar 2 (accurate structures, tenses, articles, prepositions, agreement), Vocabulary 2 (appropriate and varied), Spelling 2 (check carefully). Template: 'The lecture focused on [topic], particularly [key point 1] and [key point 2]. The speaker also discussed [key point 3], explaining that [important detail]. Furthermore, [factor] can have a significant impact on [area]. Overall, the lecture highlighted the importance of [main conclusion] in relation to [topic].' Avoid unnecessary repetition of the same keywords/phrases.",
+    "priority": 4
+  }
+]

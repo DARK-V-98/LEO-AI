@@ -725,6 +725,63 @@ STUDENTS.onSnapshot(
   (err) => console.error("Failed to watch students:", err)
 );
 
+// --- PTE knowledge base (the dashboard's "Brain" page) -------------------
+// Tag/keyword retrieval, not full-context stuffing — see
+// docs/leo-pte-trainer-plan.md §3 for why. Cached in memory via the same
+// live-listener pattern as everything else above; this collection is
+// small enough (hand-authored entries, not a huge corpus) that holding it
+// all in memory and scoring client-side per message is simpler and cheap
+// enough, with no extra infra (no vector index, no embeddings calls).
+const PTE_KNOWLEDGE = db.collection("pteKnowledge");
+let pteKnowledgeCache = [];
+PTE_KNOWLEDGE.onSnapshot(
+  (snap) => {
+    pteKnowledgeCache = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  },
+  (err) => console.error("Failed to watch pteKnowledge:", err)
+);
+
+function wordsOf(text) {
+  return new Set(
+    (text || "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length > 2)
+  );
+}
+
+/** Top-N pteKnowledge entries whose tags/topic actually overlap with the
+ * student's message — keeps the prompt small and relevant regardless of
+ * how large the knowledge base grows. Returns [] (not an error) if
+ * nothing matches; the trainer persona already handles "I'm not sure,
+ * I'll check" gracefully without this. */
+function retrievePteKnowledge(askText, maxEntries = 4) {
+  const words = wordsOf(askText);
+  if (words.size === 0 || pteKnowledgeCache.length === 0) return [];
+
+  const scored = pteKnowledgeCache
+    .map((entry) => {
+      let score = 0;
+      for (const tag of entry.tags || []) {
+        if (words.has(String(tag).toLowerCase())) score += 2;
+      }
+      for (const seg of String(entry.topic || "").split(".")) {
+        if (words.has(seg.toLowerCase())) score += 1;
+      }
+      return { entry, score };
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score || (b.entry.priority || 0) - (a.entry.priority || 0));
+
+  return scored.slice(0, maxEntries).map((s) => s.entry);
+}
+
+function formatKnowledgeForPrompt(entries) {
+  if (entries.length === 0) return "";
+  const blocks = entries.map((e) => `[${e.topic}]\n${e.content}`).join("\n\n");
+  return `Relevant PTE training notes for this message (use them, don't just repeat them verbatim):\n\n${blocks}`;
+}
+
 const EXPIRY_NOTICE_TEXT =
   "Hi — your access to LEO has expired. Please contact your trainer/admin to renew it.";
 
@@ -1226,12 +1283,20 @@ async function askLeo(jid, senderJid, isGroup, attachment) {
     return "I'm not fully set up to chat here yet — ask the team to finish the WhatsApp setup (LEO_WEB_BASE_URL).";
   }
   try {
-    const context = await getCompanyContext(senderJid, isGroup);
     // Trainer persona applies to the conversation, not the sender — a
     // marked class group is a PTE class regardless of who's typing in it;
     // a student's own DM is always trainer mode. Everything else (an
     // admin's personal DM/company group doing ops work) stays "operator".
     const mode = isGroup ? (isClassGroup(jid) ? "trainer" : "operator") : studentsByJid.has(senderJid) ? "trainer" : "operator";
+
+    let context = await getCompanyContext(senderJid, isGroup);
+    if (mode === "trainer") {
+      const lastUserMessage = [...(chatMemory.get(jid) || [])].reverse().find((m) => m.role === "user");
+      const knowledge = retrievePteKnowledge(lastUserMessage?.content || "");
+      const knowledgeBlock = formatKnowledgeForPrompt(knowledge);
+      if (knowledgeBlock) context = context ? `${context}\n\n${knowledgeBlock}` : knowledgeBlock;
+    }
+
     const res = await fetch(`${WEB_BASE_URL}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

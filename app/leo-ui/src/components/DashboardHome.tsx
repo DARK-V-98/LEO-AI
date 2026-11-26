@@ -274,7 +274,7 @@ export default function DashboardHome({
             <QuickAction icon={Link2} label="Link WhatsApp" onClick={() => onNavigate("integrations")} />
             <QuickAction icon={UserPlus} label="Add Admin" onClick={() => onNavigate("users")} />
             <QuickAction icon={Users2} label="Class Groups" onClick={() => onNavigate("chatbot-setup")} />
-            <QuickAction icon={BookOpen} label="Knowledge Base" onClick={() => onNavigate("knowledge")} />
+            <QuickAction icon={BookOpen} label="LEO's Brain" onClick={() => onNavigate("brain")} />
           </div>
         </div>
       </div>

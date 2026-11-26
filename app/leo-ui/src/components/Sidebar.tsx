@@ -4,7 +4,7 @@ import Image from "next/image";
 import {
   LayoutDashboard,
   MessageSquare,
-  BookOpen,
+  Brain,
   Cpu,
   Bot,
   BarChart3,
@@ -18,7 +18,7 @@ import {
 export type NavId =
   | "home"
   | "conversations"
-  | "knowledge"
+  | "brain"
   | "ai-model"
   | "chatbot-setup"
   | "analytics"
@@ -31,7 +31,7 @@ export type NavId =
 const NAV_ITEMS: { id: NavId; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "home", label: "Dashboard", icon: LayoutDashboard },
   { id: "conversations", label: "Conversations", icon: MessageSquare },
-  { id: "knowledge", label: "Knowledge Base", icon: BookOpen },
+  { id: "brain", label: "Brain", icon: Brain },
   { id: "ai-model", label: "AI Model", icon: Cpu },
   { id: "chatbot-setup", label: "Chatbot Setup", icon: Bot },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
