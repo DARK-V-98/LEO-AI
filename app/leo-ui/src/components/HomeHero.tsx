@@ -284,7 +284,7 @@ export default function HomeHero({
             </button>
             <button
               onClick={() => setMicGateSeen(true)}
-              className="flex items-center gap-1 rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-muted hover:bg-white/10"
+              className="flex items-center gap-1 rounded-lg bg-black/[0.04] px-3 py-1.5 text-xs font-medium text-muted hover:bg-black/[0.06]"
             >
               <X size={13} /> Not now
             </button>
@@ -301,7 +301,7 @@ export default function HomeHero({
             {micError === "blocked" ? (
               <button
                 onClick={() => window.location.reload()}
-                className="flex items-center gap-1 rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-white/10"
+                className="flex items-center gap-1 rounded-lg bg-black/[0.04] px-3 py-1.5 text-xs font-medium text-foreground hover:bg-black/[0.06]"
               >
                 <RotateCw size={13} /> Reload page
               </button>

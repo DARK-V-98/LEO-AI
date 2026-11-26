@@ -104,7 +104,7 @@ export default function Topbar({
         <div ref={menuRef} className="relative">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            className="flex items-center gap-2 rounded-xl border border-panel-border px-2 py-1.5 pr-3 text-sm text-foreground transition-colors hover:bg-white/5"
+            className="flex items-center gap-2 rounded-xl border border-panel-border px-2 py-1.5 pr-3 text-sm text-foreground transition-colors hover:bg-black/[0.05]"
           >
             <div
               className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold"

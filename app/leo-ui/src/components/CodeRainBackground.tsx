@@ -50,7 +50,7 @@ export default function CodeRainBackground() {
     function draw() {
       frame++;
       if (frame % 2 === 0) {
-        ctx!.fillStyle = "rgba(5, 8, 16, 0.18)";
+        ctx!.fillStyle = "rgba(244, 246, 251, 0.22)";
         ctx!.fillRect(0, 0, width, height);
 
         ctx!.font = `${fontSize}px ui-monospace, Menlo, monospace`;
@@ -62,8 +62,8 @@ export default function CodeRainBackground() {
 
           const leadBoost = Math.random() > 0.94;
           ctx!.fillStyle = leadBoost
-            ? "rgba(170, 255, 240, 0.95)"
-            : "rgba(0, 229, 255, 0.55)";
+            ? "rgba(8, 100, 130, 0.5)"
+            : "rgba(8, 145, 178, 0.14)";
           ctx!.fillText(text, x, y);
 
           if (y > height && Math.random() > 0.975) {
@@ -91,7 +91,7 @@ export default function CodeRainBackground() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(85% 65% at 50% 10%, rgba(5,8,16,0.1) 0%, rgba(5,8,16,0.35) 55%, rgba(5,8,16,0.55) 100%)",
+            "radial-gradient(85% 65% at 50% 10%, rgba(244,246,251,0.4) 0%, rgba(244,246,251,0.75) 55%, rgba(244,246,251,0.92) 100%)",
         }}
       />
     </div>

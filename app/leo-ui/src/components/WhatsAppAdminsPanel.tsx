@@ -68,7 +68,7 @@ export default function WhatsAppAdminsPanel() {
             WhatsApp itself.
           </p>
 
-          <div className="flex flex-col gap-2 rounded-xl border border-panel-border bg-white/[0.02] p-3 sm:flex-row sm:items-end">
+          <div className="flex flex-col gap-2 rounded-xl border border-panel-border bg-black/[0.03] p-3 sm:flex-row sm:items-end">
             <div className="flex-1">
               <label className="mb-1 block text-[10px] text-muted">
                 Phone number (with country code, digits only)
@@ -102,14 +102,14 @@ export default function WhatsAppAdminsPanel() {
 
           <div className="flex flex-col gap-1.5">
             {admins.length === 0 ? (
-              <p className="rounded-lg border border-panel-border bg-white/[0.02] p-3 text-center text-xs text-muted">
+              <p className="rounded-lg border border-panel-border bg-black/[0.03] p-3 text-center text-xs text-muted">
                 No WhatsApp admins yet — nobody can run admin commands there until you add one.
               </p>
             ) : (
               admins.map((a) => (
                 <div
                   key={a.jid}
-                  className="flex items-center justify-between rounded-lg border border-panel-border bg-white/[0.02] px-3 py-2"
+                  className="flex items-center justify-between rounded-lg border border-panel-border bg-black/[0.03] px-3 py-2"
                 >
                   <div>
                     <p className="text-xs font-medium text-foreground">+{a.phoneNumber}</p>

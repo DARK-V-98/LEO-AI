@@ -49,7 +49,7 @@ export default function ListPanel({
           return (
             <div
               key={item.id}
-              className="fade-up flex items-center justify-between rounded-xl border border-panel-border bg-white/[0.02] px-4 py-3"
+              className="fade-up flex items-center justify-between rounded-xl border border-panel-border bg-black/[0.03] px-4 py-3"
             >
               <div>
                 <p className="text-sm font-medium text-foreground">

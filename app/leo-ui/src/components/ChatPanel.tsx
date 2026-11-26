@@ -181,7 +181,7 @@ export default function ChatPanel({
               className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                 msg.from === "user"
                   ? "bg-accent-cyan/15 text-foreground"
-                  : "border border-panel-border bg-white/[0.03] text-foreground"
+                  : "border border-panel-border bg-black/[0.04] text-foreground"
               }`}
             >
               {msg.text}
@@ -220,7 +220,7 @@ export default function ChatPanel({
 
         {thinking ? (
           <div className="fade-up flex justify-start">
-            <div className="flex items-center gap-1 rounded-2xl border border-panel-border bg-white/[0.03] px-4 py-3">
+            <div className="flex items-center gap-1 rounded-2xl border border-panel-border bg-black/[0.04] px-4 py-3">
               {[0, 1, 2].map((i) => (
                 <span
                   key={i}
@@ -234,7 +234,7 @@ export default function ChatPanel({
       </div>
 
       <div className="border-t border-panel-border p-3">
-        <div className="flex items-center gap-2 rounded-xl border border-panel-border bg-white/[0.02] px-3 py-2">
+        <div className="flex items-center gap-2 rounded-xl border border-panel-border bg-black/[0.03] px-3 py-2">
           <button
             onClick={handleMicClick}
             disabled={!dictation.supported}

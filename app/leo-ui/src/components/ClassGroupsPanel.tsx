@@ -72,7 +72,7 @@ export default function ClassGroupsPanel() {
 
           <div className="flex flex-col gap-1.5">
             {groups.length === 0 ? (
-              <p className="rounded-lg border border-panel-border bg-white/[0.02] p-3 text-center text-xs text-muted">
+              <p className="rounded-lg border border-panel-border bg-black/[0.03] p-3 text-center text-xs text-muted">
                 No WhatsApp groups seen yet — LEO needs to have received at least one message in a
                 group before it shows up here.
               </p>
@@ -85,7 +85,7 @@ export default function ClassGroupsPanel() {
                 return (
                   <div
                     key={g.id}
-                    className="flex flex-col gap-2 rounded-lg border border-panel-border bg-white/[0.02] px-3 py-2"
+                    className="flex flex-col gap-2 rounded-lg border border-panel-border bg-black/[0.03] px-3 py-2"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
@@ -148,7 +148,7 @@ export default function ClassGroupsPanel() {
                           </button>
                           <button
                             onClick={() => setEditingJid(null)}
-                            className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] text-muted hover:bg-white/[0.04]"
+                            className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] text-muted hover:bg-black/[0.05]"
                           >
                             <X size={12} />
                             Cancel

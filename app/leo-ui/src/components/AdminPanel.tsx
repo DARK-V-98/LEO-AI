@@ -26,6 +26,7 @@ import { subscribeLmsStatus, requestLmsCheck, LmsStatus } from "@/lib/lmsStatus"
 import { firebaseEnabled } from "@/lib/firebase";
 import WhatsAppChatsPanel from "./WhatsAppChatsPanel";
 import WhatsAppAdminsPanel from "./WhatsAppAdminsPanel";
+import DashboardAdminsPanel from "./DashboardAdminsPanel";
 import ClassGroupsPanel from "./ClassGroupsPanel";
 
 type ProviderStatus = { ok: boolean; message: string; detail?: string };
@@ -141,7 +142,7 @@ export default function AdminPanel() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-panel-border bg-white/[0.02] p-4">
+      <div className="rounded-xl border border-panel-border bg-black/[0.03] p-4">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Smartphone size={16} className="text-muted" />
@@ -227,13 +228,13 @@ export default function AdminPanel() {
         )}
       </div>
 
-      <div className="rounded-xl border border-panel-border bg-white/[0.02] p-4 text-xs text-muted">
+      <div className="rounded-xl border border-panel-border bg-black/[0.03] p-4 text-xs text-muted">
         The WhatsApp connection is handled by a separate always-on worker
         (not this website) — this panel only shows its live status and
         sends it link/unlink requests via Firestore.
       </div>
 
-      <div className="rounded-xl border border-panel-border bg-white/[0.02] p-4">
+      <div className="rounded-xl border border-panel-border bg-black/[0.03] p-4">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Gauge size={16} className="text-muted" />
@@ -266,7 +267,7 @@ export default function AdminPanel() {
             ).map(([label, p]) => (
               <div
                 key={label}
-                className="flex items-start gap-2 rounded-lg border border-panel-border bg-white/[0.02] px-3 py-2"
+                className="flex items-start gap-2 rounded-lg border border-panel-border bg-black/[0.03] px-3 py-2"
               >
                 {p.ok ? (
                   <CheckCircle2 size={14} className="mt-0.5 flex-shrink-0 text-accent-green" />
@@ -289,7 +290,7 @@ export default function AdminPanel() {
         )}
       </div>
 
-      <div className="rounded-xl border border-panel-border bg-white/[0.02] p-4">
+      <div className="rounded-xl border border-panel-border bg-black/[0.03] p-4">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <List size={16} className="text-muted" />
@@ -357,7 +358,7 @@ export default function AdminPanel() {
         )}
       </div>
 
-      <div className="rounded-xl border border-panel-border bg-white/[0.02] p-4">
+      <div className="rounded-xl border border-panel-border bg-black/[0.03] p-4">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <GraduationCap size={16} className="text-muted" />
@@ -385,7 +386,7 @@ export default function AdminPanel() {
           </p>
         ) : (
           <div className="flex flex-col gap-2">
-            <div className="flex items-start gap-2 rounded-lg border border-panel-border bg-white/[0.02] px-3 py-2">
+            <div className="flex items-start gap-2 rounded-lg border border-panel-border bg-black/[0.03] px-3 py-2">
               {lmsStatus.ok ? (
                 <CheckCircle2 size={14} className="mt-0.5 flex-shrink-0 text-accent-green" />
               ) : (
@@ -406,6 +407,8 @@ export default function AdminPanel() {
           </div>
         )}
       </div>
+
+      <DashboardAdminsPanel />
 
       <WhatsAppAdminsPanel />
 

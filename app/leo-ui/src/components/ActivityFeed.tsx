@@ -52,7 +52,7 @@ export default function ActivityFeed() {
             return (
               <div
                 key={ev.id}
-                className="fade-up flex items-start gap-3 rounded-xl border border-panel-border bg-white/[0.02] p-3"
+                className="fade-up flex items-start gap-3 rounded-xl border border-panel-border bg-black/[0.03] p-3"
               >
                 <Icon size={15} className="mt-0.5 flex-shrink-0" style={{ color }} />
                 <div className="flex-1">

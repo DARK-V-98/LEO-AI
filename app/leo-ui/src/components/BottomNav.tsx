@@ -68,7 +68,7 @@ export default function BottomNav({
             className={`relative flex min-w-[64px] flex-1 flex-col items-center gap-1 rounded-xl px-2 py-2 text-[11px] transition-all ${
               isActive
                 ? "bg-accent-cyan/10 text-foreground"
-                : "text-muted hover:bg-white/5 hover:text-foreground"
+                : "text-muted hover:bg-black/[0.05] hover:text-foreground"
             }`}
           >
             <Icon

@@ -107,6 +107,19 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    // Dashboard admins — emails allowed to sign into the LEO dashboard
+    // itself (separate from whatsappAdmins, which is about admin commands
+    // on WhatsApp). The developer role always has access and manages this
+    // list; a signed-in user may read only their own entry, so the app can
+    // check "am I allowed in" without granting a full list read to anyone
+    // but the developer. Same reasoning as whatsappAdmins: only grantable
+    // from the dashboard, never self-service.
+    match /dashboardAdmins/{email} {
+      allow read: if isDeveloper() || (isSignedIn() && request.auth.token.email.lower() == email);
+      allow create, delete: if isDeveloper();
+      allow update: if false;
+    }
+
     // LMS connection status — written only by the bridge worker (Admin
     // SDK), which is the only thing that actually holds the LMS_BASE_URL/
     // LMS_API_KEY credentials. The dashboard only ever reads it.

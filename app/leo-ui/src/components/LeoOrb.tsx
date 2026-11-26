@@ -14,15 +14,15 @@ export type LeoMood =
   | "angry";
 
 const MOOD_RGB: Record<LeoMood, [number, number, number]> = {
-  idle: [0, 229, 255],
-  listening: [255, 47, 176],
-  thinking: [139, 92, 246],
-  speaking: [0, 229, 255],
-  happy: [57, 255, 156],
-  alert: [255, 176, 32],
-  sad: [77, 140, 255],
-  confused: [217, 165, 44],
-  angry: [255, 59, 48],
+  idle: [8, 145, 178],
+  listening: [219, 39, 119],
+  thinking: [124, 58, 237],
+  speaking: [8, 145, 178],
+  happy: [5, 150, 105],
+  alert: [217, 119, 6],
+  sad: [37, 99, 235],
+  confused: [180, 130, 20],
+  angry: [220, 38, 38],
 };
 
 const MOOD_LABEL: Record<LeoMood, string> = {

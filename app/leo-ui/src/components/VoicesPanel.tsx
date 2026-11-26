@@ -101,7 +101,7 @@ export default function VoicesPanel({
         </span>
       </div>
 
-      <div className="mb-4 rounded-xl border border-panel-border bg-white/[0.02] p-3 text-[12px] leading-relaxed text-muted">
+      <div className="mb-4 rounded-xl border border-panel-border bg-black/[0.03] p-3 text-[12px] leading-relaxed text-muted">
         LEO uses a lightweight local voiceprint (pitch + tone shape) to tell
         speakers apart — it is not a full AI model, so it runs instantly and
         never leaves this check to a remote call. The first time someone new
@@ -113,7 +113,7 @@ export default function VoicesPanel({
         <button
           onClick={handleIdentify}
           disabled={busy}
-          className="flex items-center gap-2 rounded-xl border border-panel-border bg-white/[0.02] px-3 py-2 text-xs text-foreground transition-colors hover:bg-white/5 disabled:opacity-50"
+          className="flex items-center gap-2 rounded-xl border border-panel-border bg-black/[0.03] px-3 py-2 text-xs text-foreground transition-colors hover:bg-black/[0.05] disabled:opacity-50"
         >
           <Fingerprint size={14} className="text-accent-cyan" />
           {busy ? "Listening…" : "Who's talking? (test)"}
@@ -146,7 +146,7 @@ export default function VoicesPanel({
               onChange={(e) => setPendingName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && confirmEnroll()}
               placeholder="e.g. Thimira"
-              className="flex-1 rounded-lg border border-panel-border bg-white/[0.03] px-3 py-1.5 text-xs text-foreground placeholder:text-muted focus:outline-none"
+              className="flex-1 rounded-lg border border-panel-border bg-black/[0.04] px-3 py-1.5 text-xs text-foreground placeholder:text-muted focus:outline-none"
             />
             <button
               onClick={confirmEnroll}
@@ -174,7 +174,7 @@ export default function VoicesPanel({
           profiles.map((p) => (
             <div
               key={p.id}
-              className="flex items-center justify-between rounded-xl border border-panel-border bg-white/[0.02] px-4 py-3"
+              className="flex items-center justify-between rounded-xl border border-panel-border bg-black/[0.03] px-4 py-3"
             >
               <div>
                 <p className="text-sm font-medium text-foreground">

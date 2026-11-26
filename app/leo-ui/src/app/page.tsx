@@ -89,7 +89,7 @@ function DashboardApp() {
             />
 
             {lastHeard && !immersive ? (
-              <div className="fade-up rounded-xl border border-panel-border bg-white/[0.02] px-4 py-2 text-center text-xs text-muted">
+              <div className="fade-up rounded-xl border border-panel-border bg-black/[0.03] px-4 py-2 text-center text-xs text-muted">
                 Heard: <span className="text-foreground">&quot;{lastHeard}&quot;</span>
               </div>
             ) : null}

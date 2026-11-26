@@ -1,13 +1,13 @@
 "use client";
 
-import { LogIn, AlertTriangle } from "lucide-react";
+import { LogIn, AlertTriangle, ShieldX } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import LeoOrb from "./LeoOrb";
 import CodeRainBackground from "./CodeRainBackground";
 import { firebaseEnabled } from "@/lib/firebase";
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
-  const { status, error, signIn } = useAuth();
+  const { status, error, signIn, signOut, user } = useAuth();
 
   if (status === "loading") {
     return (
@@ -20,6 +20,33 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (status === "signed-in") {
     return <>{children}</>;
+  }
+
+  if (status === "unauthorized") {
+    return (
+      <div className="relative flex min-h-screen w-full items-center justify-center p-4">
+        <CodeRainBackground />
+        <div className="glass-panel flex w-full max-w-sm flex-col items-center gap-5 rounded-2xl p-8 text-center">
+          <LeoOrb mood="alert" size={120} hud />
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Access restricted</h1>
+            <p className="font-mono text-[11px] text-muted">
+              {user?.email} isn&apos;t on LEO&apos;s dashboard access list.
+            </p>
+          </div>
+          <div className="flex items-start gap-2 rounded-xl border border-accent-amber/30 bg-accent-amber/5 p-3 text-left text-xs text-accent-amber">
+            <ShieldX size={14} className="mt-0.5 flex-shrink-0" />
+            Ask a developer or admin to add your email, then sign in again.
+          </div>
+          <button
+            onClick={signOut}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-panel-border px-4 py-2.5 text-sm font-medium text-muted transition-colors hover:text-foreground"
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (

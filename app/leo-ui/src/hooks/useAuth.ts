@@ -10,8 +10,9 @@ import {
 } from "firebase/auth";
 import { auth, firebaseEnabled } from "@/lib/firebase";
 import { isDeveloper } from "@/lib/roles";
+import { isDashboardAdmin } from "@/lib/dashboardAdmins";
 
-export type AuthStatus = "loading" | "signed-out" | "signed-in";
+export type AuthStatus = "loading" | "signed-out" | "signed-in" | "unauthorized";
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -23,9 +24,18 @@ export function useAuth() {
       setStatus("signed-out");
       return;
     }
-    return onAuthStateChanged(auth, (u) => {
+    return onAuthStateChanged(auth, async (u) => {
       setUser(u);
-      setStatus(u ? "signed-in" : "signed-out");
+      if (!u) {
+        setStatus("signed-out");
+        return;
+      }
+      if (isDeveloper(u.email)) {
+        setStatus("signed-in");
+        return;
+      }
+      const allowed = await isDashboardAdmin(u.email);
+      setStatus(allowed ? "signed-in" : "unauthorized");
     });
   }, []);
 
