@@ -4,7 +4,7 @@
 // a Firestore-backed role system — simplest thing that's actually correct
 // while there's a single known admin; move to a `roles` collection once
 // there's more than a couple of people to manage.
-const DEVELOPER_EMAILS = ["thimira.vishwa2003@gmail.com"];
+export const DEVELOPER_EMAILS = ["thimira.vishwa2003@gmail.com"];
 
 export function isDeveloper(email: string | null | undefined): boolean {
   if (!email) return false;

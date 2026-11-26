@@ -51,6 +51,7 @@ const CLASS_GROUPS = db.collection("classGroups");
 const SCORING_RUBRICS = db.collection("scoringRubrics");
 const ESSAY_SUBMISSIONS = db.collection("essaySubmissions");
 const SPEAKING_SUBMISSIONS = db.collection("speakingSubmissions");
+const DAILY_STATS = db.collection("dailyStats");
 
 // Optional: a WhatsApp JID (a number like "94771234567@s.whatsapp.net") to
 // send a once-a-day summary of new leads/tasks to. Unset by default — the
@@ -789,11 +790,48 @@ function chatMessagesRef(jid) {
 const chatMemory = new Map();
 const HISTORY_FOR_AI = 20; // how much recent context to actually send the model
 
+// Lightweight daily analytics for the dashboard — one Firestore doc per
+// Sri-Lanka-local day (dailyStats/{YYYY-MM-DD}), updated with atomic
+// increments so concurrent messages never race each other. Real numbers
+// only: nothing here is backfilled or estimated, every column just starts
+// at zero the day this shipped. LOCAL_TZ_OFFSET_MINUTES is defined further
+// down this file but already initialized by the time any message is
+// processed, since nothing calls these functions during module load.
+function dailyStatsDateKey(date = new Date()) {
+  const shifted = new Date(date.getTime() + LOCAL_TZ_OFFSET_MINUTES * 60_000);
+  return shifted.toISOString().slice(0, 10); // YYYY-MM-DD, in local time
+}
+
+function recordMessageStat() {
+  DAILY_STATS.doc(dailyStatsDateKey())
+    .set({ messageCount: FieldValue.increment(1) }, { merge: true })
+    .catch((err) => console.error("Failed to record message stat:", err));
+}
+
+/** Records how long one inbound message took to get a reply, from the end
+ * of the turn-debounce window to the reply actually being ready — not
+ * from when WhatsApp delivered the message, since the debounce delay is a
+ * deliberate UX grouping wait, not processing time. */
+function recordResponseTimeStat(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return;
+  DAILY_STATS.doc(dailyStatsDateKey())
+    .set(
+      {
+        responseTimeMsSum: FieldValue.increment(ms),
+        responseTimeMsCount: FieldValue.increment(1),
+      },
+      { merge: true }
+    )
+    .catch((err) => console.error("Failed to record response-time stat:", err));
+}
+
 function remember(jid, role, content) {
   const history = chatMemory.get(jid) ?? [];
   history.push({ role, content });
   while (history.length > HISTORY_FOR_AI) history.shift();
   chatMemory.set(jid, history);
+
+  recordMessageStat();
 
   chatMessagesRef(jid)
     .add({ role, content, createdAt: Date.now() })
@@ -3089,13 +3127,16 @@ function attachMessageHandler(activeSock) {
           pendingTurns.delete(turnKey);
           const combinedText = entry.parts.join("\n").trim();
           if (!combinedText && !entry.representativeMsg) return;
+          const turnStartedAt = Date.now();
           processTurn(activeSock, {
             remoteJid,
             senderJid: entry.senderJid,
             isGroup: entry.isGroup,
             askText: combinedText,
             msg: entry.representativeMsg,
-          }).catch((err) => console.error("Failed to process a WhatsApp turn:", err));
+          })
+            .then(() => recordResponseTimeStat(Date.now() - turnStartedAt))
+            .catch((err) => console.error("Failed to process a WhatsApp turn:", err));
         }, TURN_DEBOUNCE_MS);
       } catch (err) {
         console.error("Failed to buffer an incoming WhatsApp message:", err);

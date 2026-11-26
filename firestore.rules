@@ -164,5 +164,21 @@ service cloud.firestore {
       allow read: if isDeveloper();
       allow write: if false;
     }
+
+    // Daily dashboard analytics (message counts, response-time totals) —
+    // written only by the bridge worker (Admin SDK). Developer-only read,
+    // same as every other bridge-owned stats/config collection.
+    match /dailyStats/{dateKey} {
+      allow read: if isDeveloper();
+      allow write: if false;
+    }
+
+    // Facts LEO has been told to remember (seeded + "remember that..." from
+    // chat) — written only by the bridge worker (Admin SDK).
+    // Developer-only read, same as every other bridge-owned collection.
+    match /companyKnowledge/{id} {
+      allow read: if isDeveloper();
+      allow write: if false;
+    }
   }
 }
