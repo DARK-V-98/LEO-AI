@@ -56,7 +56,7 @@ function DashboardApp() {
 
         <button
           onClick={() => setImmersive((v) => !v)}
-          title={immersive ? "Show interface" : "Hide interface — let LEO roam free"}
+          title={immersive ? "Show interface" : "Focus mode — hide the rest of the dashboard"}
           className="glass-panel fixed right-4 top-4 z-40 flex h-9 w-9 items-center justify-center rounded-full text-muted transition-colors hover:text-accent-cyan"
         >
           {immersive ? <Eye size={15} /> : <EyeOff size={15} />}

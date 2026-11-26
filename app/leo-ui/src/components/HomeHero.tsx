@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Mic, MicOff, Ear, ShieldCheck, Check, X, RotateCw, Settings2, ExternalLink } from "lucide-react";
-import LeoOrb from "./LeoOrb";
+import LeoBadge from "./LeoBadge";
 import { useWakeWord, VoiceLang } from "@/hooks/useWakeWord";
 import { MicErrorKind, MicPermissionState } from "@/hooks/useMicPermission";
 import { useVoiceId } from "@/hooks/useVoiceId";
@@ -46,20 +46,6 @@ const ERROR_COPY: Record<MicErrorKind, { title: string; detail: string }> = {
   },
 };
 
-function useOrbSize() {
-  const [size, setSize] = useState(260);
-  useEffect(() => {
-    const compute = () => {
-      const next = Math.min(window.innerWidth * 0.62, window.innerHeight * 0.42, 420);
-      setSize(Math.max(220, Math.round(next)));
-    };
-    compute();
-    window.addEventListener("resize", compute);
-    return () => window.removeEventListener("resize", compute);
-  }, []);
-  return size;
-}
-
 export default function HomeHero({
   onHeardCommand,
   micState,
@@ -84,7 +70,6 @@ export default function HomeHero({
   const [profiles, setProfiles] = useState<VoiceProfile[]>([]);
   const { captureSignature } = useVoiceId();
   const { speak } = useSpeech();
-  const orbSize = useOrbSize();
   const respondRef = useRef<(command: string) => void>(() => {});
 
   useEffect(() => subscribeVoiceProfiles(setProfiles), []);
@@ -226,26 +211,28 @@ export default function HomeHero({
 
   return (
     <div
-      className={`relative flex w-full flex-col items-center justify-center gap-6 overflow-hidden rounded-2xl p-6 ${
+      className={`flex w-full flex-col items-center justify-center gap-6 p-6 ${
         fullSpace ? "h-full" : "min-h-[72vh]"
       }`}
     >
-      {/* LEO roams this whole area freely instead of sitting pinned in place */}
-      <div className="pointer-events-none absolute inset-0">
-        <LeoOrb mood={mood} size={orbSize} showLabel hud freeRoam />
-      </div>
+      <div className="glass-panel flex w-full max-w-md flex-col items-center gap-5 rounded-2xl p-8 text-center">
+        <LeoBadge mood={mood} size={64} showLabel />
 
-      {!fullSpace ? (
-        <div className="pointer-events-none relative z-10 flex flex-col items-center gap-2">
-          <h1 className="mt-2 text-xl font-semibold tracking-wide text-foreground">
-            LEO
-          </h1>
-          <p className="font-mono text-[11px] text-muted">
-            SmartLabs NeuraLink · always on
-          </p>
+        <div>
+          <h1 className="text-lg font-semibold text-foreground">LEO Controller</h1>
+          <p className="text-[11px] text-muted">SmartLabs · always on</p>
         </div>
-      ) : null}
 
+        <div className="flex w-full flex-col items-center gap-4">
+          {renderBody()}
+        </div>
+      </div>
+    </div>
+  );
+
+  function renderBody() {
+    return (
+    <>
       {greeting ? (
         <div className="fade-up max-w-md rounded-2xl border border-accent-cyan/30 bg-accent-cyan/5 px-4 py-2 text-center text-xs leading-relaxed text-foreground">
           {greeting}
@@ -356,6 +343,7 @@ export default function HomeHero({
           ) : null}
         </div>
       )}
-    </div>
-  );
+    </>
+    );
+  }
 }

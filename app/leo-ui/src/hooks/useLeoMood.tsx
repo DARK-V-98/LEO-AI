@@ -1,7 +1,17 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import type { LeoMood } from "@/components/LeoOrb";
+
+export type LeoMood =
+  | "idle"
+  | "listening"
+  | "thinking"
+  | "speaking"
+  | "happy"
+  | "alert"
+  | "sad"
+  | "confused"
+  | "angry";
 
 type MoodContextValue = {
   mood: LeoMood;
@@ -27,15 +37,15 @@ export function useLeoMood() {
 }
 
 const MOOD_HEX: Record<LeoMood, string> = {
-  idle: "#00e5ff",
-  listening: "#ff2fb0",
-  thinking: "#8b5cf6",
-  speaking: "#00e5ff",
-  happy: "#39ff9c",
-  alert: "#ffb020",
-  sad: "#4d8cff",
-  confused: "#d9a52c",
-  angry: "#ff3b30",
+  idle: "#0891b2",
+  listening: "#db2777",
+  thinking: "#7c3aed",
+  speaking: "#0891b2",
+  happy: "#059669",
+  alert: "#d97706",
+  sad: "#2563eb",
+  confused: "#b45309",
+  angry: "#dc2626",
 };
 
 /** Mounted once near the app root — recolors the whole UI's primary accent

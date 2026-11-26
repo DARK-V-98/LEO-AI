@@ -775,8 +775,9 @@ let starting = false;
 // a leftover unprocessed "link" command both firing at startup.
 let socketState = "idle";
 
-// Every message either side sends is kept permanently — not just an
-// in-memory cache that forgets on restart. Each chat (a DM's JID, or a
+// Every message either side sends is persisted — not just an in-memory
+// cache that forgets on restart — and kept for CHAT_RETENTION_DAYS (see
+// pruneOldChatMessages() below), not forever. Each chat (a DM's JID, or a
 // group's JID) gets its own Firestore subcollection, so one person's DM
 // history is never readable from, or mixed into, anyone else's chat — a
 // group's history is naturally shared with that group already, same as
@@ -836,6 +837,43 @@ async function ensureHistoryLoaded(jid) {
   } catch (err) {
     console.error(`Failed to load history for ${jid}:`, err);
     chatMemory.set(jid, []);
+  }
+}
+
+// Chat history is kept for CHAT_RETENTION_DAYS, not forever — every
+// student's (and everyone else's) WhatsApp messages age out automatically.
+// Sweeps each whatsappChats/{jid}/messages subcollection for docs older
+// than the cutoff and deletes them in batches. Iterates chats individually
+// (not a collectionGroup query) so it needs no extra Firestore index —
+// a plain per-collection inequality query on createdAt already has one
+// by default.
+const CHAT_RETENTION_DAYS = 30;
+const CHAT_RETENTION_MS = CHAT_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+async function pruneOldChatMessages() {
+  const cutoff = Date.now() - CHAT_RETENTION_MS;
+  try {
+    const chatsSnap = await db.collection("whatsappChats").select().get();
+    let deleted = 0;
+    for (const chatDoc of chatsSnap.docs) {
+      const ref = chatMessagesRef(chatDoc.id);
+      for (;;) {
+        const snap = await ref.where("createdAt", "<", cutoff).limit(400).get();
+        if (snap.empty) break;
+        const batch = db.batch();
+        snap.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+        deleted += snap.docs.length;
+        if (snap.docs.length < 400) break;
+      }
+    }
+    if (deleted > 0) {
+      console.log(
+        `Pruned ${deleted} chat message(s) older than ${CHAT_RETENTION_DAYS} days across ${chatsSnap.size} chat(s).`
+      );
+    }
+  } catch (err) {
+    console.error("Failed to prune old chat messages:", err);
   }
 }
 
@@ -3250,5 +3288,10 @@ setInterval(runScheduler, 20_000);
 // The digest itself only needs to be checked a few times around the
 // morning, not every 20s — every 10 minutes is plenty.
 setInterval(maybeSendDailyDigest, 10 * 60_000);
+
+// Chat retention doesn't need to be timely either — a 30-day cutoff is
+// just as correct whether it's swept once an hour or once every six.
+pruneOldChatMessages();
+setInterval(pruneOldChatMessages, 6 * 60 * 60_000);
 
 process.on("SIGTERM", () => process.exit(0));

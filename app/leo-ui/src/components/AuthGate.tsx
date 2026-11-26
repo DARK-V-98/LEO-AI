@@ -2,7 +2,7 @@
 
 import { LogIn, AlertTriangle, ShieldX } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import LeoOrb from "./LeoOrb";
+import LeoBadge from "./LeoBadge";
 import CodeRainBackground from "./CodeRainBackground";
 import { firebaseEnabled } from "@/lib/firebase";
 
@@ -13,7 +13,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center">
         <CodeRainBackground />
-        <LeoOrb mood="thinking" size={120} />
+        <LeoBadge mood="thinking" size={72} />
       </div>
     );
   }
@@ -27,10 +27,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       <div className="relative flex min-h-screen w-full items-center justify-center p-4">
         <CodeRainBackground />
         <div className="glass-panel flex w-full max-w-sm flex-col items-center gap-5 rounded-2xl p-8 text-center">
-          <LeoOrb mood="alert" size={120} hud />
+          <LeoBadge mood="alert" size={72} />
           <div>
             <h1 className="text-lg font-semibold text-foreground">Access restricted</h1>
-            <p className="font-mono text-[11px] text-muted">
+            <p className="text-[11px] text-muted">
               {user?.email} isn&apos;t on LEO&apos;s dashboard access list.
             </p>
           </div>
@@ -53,11 +53,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     <div className="relative flex min-h-screen w-full items-center justify-center p-4">
       <CodeRainBackground />
       <div className="glass-panel flex w-full max-w-sm flex-col items-center gap-5 rounded-2xl p-8 text-center">
-        <LeoOrb mood="idle" size={120} hud />
+        <LeoBadge mood="idle" size={72} />
         <div>
-          <h1 className="text-lg font-semibold text-foreground">LEO AI</h1>
-          <p className="font-mono text-[11px] text-muted">
-            SmartLabs NeuraLink · sign in to continue
+          <h1 className="text-lg font-semibold text-foreground">LEO Controller</h1>
+          <p className="text-[11px] text-muted">
+            SmartLabs · sign in to continue
           </p>
         </div>
 

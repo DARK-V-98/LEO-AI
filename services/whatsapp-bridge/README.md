@@ -239,14 +239,17 @@ dates, not the AI — so these are fast and don't cost an AI call):
   actual WhatsApp poll to the chat instead of people manually tallying
   replies (2–12 options).
 
-- **Every message is saved** — every DM and group message either side
-  sends is permanently stored in Firestore (`whatsappChats/{chatJid}/
+- **Every message is saved, for 30 days** — every DM and group message
+  either side sends is stored in Firestore (`whatsappChats/{chatJid}/
   messages`), not just kept in memory until a restart. Each chat (a
-  person's DM, or a group) has its own history; one person's DM is never
-  read from or mixed into anyone else's chat — a group's history is
-  naturally shared with that group already, same as WhatsApp itself.
-  This is what gives LEO conversational memory ("what did I just ask")
-  and lets it survive a restart/redeploy.
+  person's DM, or a group — including every student's own chat) has its
+  own history; one person's DM is never read from or mixed into anyone
+  else's chat — a group's history is naturally shared with that group
+  already, same as WhatsApp itself. This is what gives LEO conversational
+  memory ("what did I just ask") and lets it survive a restart/redeploy.
+  A background sweep (`pruneOldChatMessages()`, every 6 hours) deletes
+  any message older than `CHAT_RETENTION_DAYS` (30) from every chat —
+  nothing is kept indefinitely.
   - **Telling people apart in a group**: every line saved from a group
     is labeled with who actually sent it ("Vishwa: ...", "Lahiruka:
     ..."), and the context sent for each reply names specifically who

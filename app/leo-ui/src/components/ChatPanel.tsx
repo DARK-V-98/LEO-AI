@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Mic, Send, ShieldCheck, Check, X, Volume2, VolumeX, MessageCircle } from "lucide-react";
-import LeoOrb, { LeoMood } from "./LeoOrb";
+import LeoBadge from "./LeoBadge";
+import type { LeoMood } from "@/hooks/useLeoMood";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useDictation } from "@/hooks/useDictation";
 import { VoiceLang } from "@/hooks/useWakeWord";
@@ -132,10 +133,10 @@ export default function ChatPanel({
   }
 
   return (
-    <div className="glass-panel scanline relative flex h-full flex-col overflow-hidden rounded-2xl">
+    <div className="glass-panel relative flex h-full flex-col overflow-hidden rounded-2xl">
       <div className="flex items-center justify-between border-b border-panel-border px-5 py-4">
         <div className="flex items-center gap-3">
-          <LeoOrb size={32} mood={mood} />
+          <LeoBadge size={32} mood={mood} />
           <div>
             <p className="text-sm font-semibold text-foreground">Ask LEO</p>
             <p className="font-mono text-[11px] text-muted">

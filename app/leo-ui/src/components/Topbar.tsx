@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Wifi, Languages, LogOut } from "lucide-react";
 import type { User } from "firebase/auth";
-import LeoOrb from "./LeoOrb";
+import LeoBadge from "./LeoBadge";
 import { VoiceLang } from "@/hooks/useWakeWord";
 
 function initialsFor(user: User | null): string {
@@ -51,20 +51,18 @@ export default function Topbar({
   return (
     <header className="glass-panel flex items-center justify-between rounded-2xl px-5 py-3">
       <div className="flex items-center gap-4">
-        <LeoOrb size={40} mood="idle" />
+        <LeoBadge size={40} mood="idle" />
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-semibold text-foreground">
-              NeuraLink Operator
+              LEO Controller
             </h1>
-            <span className="rounded-full border border-accent-green/40 bg-accent-green/10 px-2 py-0.5 text-[10px] font-medium tracking-wide text-accent-green">
-              REAL AI MODE
+            <span className="flex items-center gap-1 rounded-full border border-accent-green/40 bg-accent-green/10 px-2 py-0.5 text-[10px] font-medium text-accent-green">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent-green" />
+              Online
             </span>
           </div>
-          <p className="font-mono text-[11px] text-muted">
-            SYS::ONLINE &nbsp;|&nbsp; NEURALINK_ENGINE::ACTIVE &nbsp;|&nbsp;{" "}
-            {time}
-          </p>
+          <p className="text-[11px] text-muted">{time}</p>
         </div>
       </div>
 
