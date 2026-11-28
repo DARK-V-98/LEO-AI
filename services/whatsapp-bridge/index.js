@@ -828,6 +828,18 @@ async function isAuthorizedSender(activeSock, senderJid, remoteJid, isGroup) {
   return false;
 }
 
+/** Essay/speaking scoring predates the students/DM access model (it was
+ * originally class-groups-only) — now that individual students message
+ * LEO one-on-one, scoring needs to work there too, not just inside a
+ * marked class group. Mirrors the same two valid contexts
+ * isAuthorizedSender() already allows (a student's active DM already
+ * passed that gate by the time this runs, so this only needs to re-check
+ * the group case; kept as one function so the two conditions can't drift
+ * apart from each other). */
+function isScoringAllowed(senderJid, remoteJid, isGroup) {
+  return isGroup ? isClassGroup(remoteJid) : studentsByJid.has(senderJid);
+}
+
 const AUTH_DIR = process.env.AUTH_DIR || "./auth_info";
 const logger = pino({ level: process.env.LOG_LEVEL || "warn" });
 
@@ -2831,9 +2843,10 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           }
         } else if (essayScoreRequest) {
           try {
-            if (!isGroup || !isClassGroup(remoteJid)) {
-              const text =
-                "Essay scoring is only available inside a group marked as a class — ask the developer to turn it on for this group if it should be one.";
+            if (!isScoringAllowed(senderJid, remoteJid, isGroup)) {
+              const text = isGroup
+                ? "Essay scoring is only available inside a group marked as a class — ask the developer to turn it on for this group if it should be one."
+                : "Essay scoring isn't set up for your number yet — ask the developer to add you as a student from the dashboard.";
               await activeSock.sendMessage(remoteJid, { text });
               remember(remoteJid, "assistant", text);
             } else {
@@ -2930,9 +2943,10 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           }
         } else if (speakingTaskRequest) {
           try {
-            if (!isGroup || !isClassGroup(remoteJid)) {
-              const text =
-                "Speaking practice scoring is only available inside a group marked as a class — ask the developer to turn it on for this group if it should be one.";
+            if (!isScoringAllowed(senderJid, remoteJid, isGroup)) {
+              const text = isGroup
+                ? "Speaking practice scoring is only available inside a group marked as a class — ask the developer to turn it on for this group if it should be one."
+                : "Speaking practice scoring isn't set up for your number yet — ask the developer to add you as a student from the dashboard.";
               await activeSock.sendMessage(remoteJid, { text });
               remember(remoteJid, "assistant", text);
             } else {
