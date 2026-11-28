@@ -837,7 +837,18 @@ async function isAuthorizedSender(activeSock, senderJid, remoteJid, isGroup) {
  * the group case; kept as one function so the two conditions can't drift
  * apart from each other). */
 function isScoringAllowed(senderJid, remoteJid, isGroup) {
-  return isGroup ? isClassGroup(remoteJid) : studentsByJid.has(senderJid);
+  const allowed = isGroup ? isClassGroup(remoteJid) : studentsByJid.has(senderJid);
+  if (!allowed) {
+    // TEMPORARY diagnostic — same pattern as the auth-gate ones above,
+    // remove once confirmed. Reveals whether this is a JID-format
+    // mismatch between what's stored in `students` and what WhatsApp
+    // actually reports for this sender.
+    console.log(
+      `[scoring] Denied for senderJid="${senderJid}" in remoteJid="${remoteJid}" (isGroup=${isGroup}). ` +
+        `Known student JIDs: [${[...studentsByJid.keys()].join(", ")}]. Known classGroup JIDs: [${[...classGroupJids.keys()].join(", ")}].`
+    );
+  }
+  return allowed;
 }
 
 const AUTH_DIR = process.env.AUTH_DIR || "./auth_info";
