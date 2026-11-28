@@ -3219,7 +3219,17 @@ function attachMessageHandler(activeSock) {
         const isGroup = remoteJid.endsWith("@g.us");
         // Reminders are personal — if said inside a group, reply to the
         // person who asked, not the whole group.
-        const senderJid = isGroup ? msg.key.participant || remoteJid : remoteJid;
+        // WhatsApp increasingly identifies a group participant by an opaque
+        // "@lid" (privacy) identity rather than their real phone-number JID
+        // — msg.key.participant can be either. When WhatsApp also supplies
+        // the phone-number form (participantPn/senderPn — it does whenever
+        // it has one), prefer that, since every allowlist here
+        // (whatsappAdmins/students/classGroups) is keyed by phone-number
+        // JIDs, not lids. Falls back to the lid form only if no phone-number
+        // mapping was given.
+        const senderJid = isGroup
+          ? msg.key.participantPn || msg.key.participant || remoteJid
+          : msg.key.senderPn || remoteJid;
 
         // In a group, a bare photo/voice note with no mention at all isn't
         // meant for LEO — he only joins in when actually addressed, either
