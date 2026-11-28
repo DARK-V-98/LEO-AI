@@ -1427,11 +1427,18 @@ const GUIDED_ENROLL_PATTERN = /^\s*enroll\s+(?:this\s+)?student\s*[:\-]?\s*(\S+@
 const TRANSFER_PATTERN = /^\s*(?:change|move|transfer)\b(?=.*\bbatch\b).*?(\S+@\S+\.\S+)/i;
 // "list/show/get/give/send (me) (the) students (list) in/of/for/on
 // <course>" — a full roster request, resolved via the LMS's course-roster
-// endpoint (see handleCourseRosterCommand). Not anchored to the start and
-// not fussy about the exact verb, since admins ask for this many
-// different ways — but it does require the plural "students" (a singular
-// "student" is CHECK_STUDENT_PATTERN's territory, a single lookup).
-const COURSE_ROSTER_PATTERN = /\bstudents\b[\s\w]{0,25}?\b(?:in|of|for|on)\s+(.+?)\s*$/i;
+// endpoint (see handleCourseRosterCommand). Not fussy about the exact
+// verb, since admins ask for this many different ways — but it does
+// require the plural "students" (a singular "student" is
+// CHECK_STUDENT_PATTERN's territory, a single lookup).
+//
+// MUST be anchored to the start (^\s*) — it originally wasn't, on the
+// theory that admins phrase this request loosely. In practice that let
+// it match anywhere inside a long message, including students' own PTE
+// essays (which very often say "students" near "in/of/for/on" somewhere
+// in a sentence about education) — misrouting the whole essay into this
+// admin-only LMS lookup instead of essay scoring, with no indication why.
+const COURSE_ROSTER_PATTERN = /^\s*(?:\S+\s+){0,4}students\b[\s\w]{0,25}?\b(?:in|of|for|on)\s+(.+?)\s*$/i;
 // Any mention of "batch"/"batches" in a roster request means "break this
 // down per batch" rather than one flat list.
 const BY_BATCH_HINT_PATTERN = /\bbatch(?:es)?\b/i;
