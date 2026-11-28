@@ -792,7 +792,18 @@ const EXPIRY_NOTICE_TEXT =
  * never repeats), then silence. */
 async function isAuthorizedSender(activeSock, senderJid, remoteJid, isGroup) {
   if (isWhatsAppAdmin(senderJid)) return true;
-  if (isGroup) return isClassGroup(remoteJid);
+  if (isGroup) {
+    const allowed = isClassGroup(remoteJid);
+    if (!allowed) {
+      // TEMPORARY diagnostic — see matching comment below for the DM case.
+      console.log(
+        `[auth] Ignored group message from senderJid="${senderJid}" in remoteJid="${remoteJid}" ` +
+          `(not a recognized admin, and this group isn't in classGroups). ` +
+          `Known admin JIDs: [${[...adminJids].join(", ")}]. Known classGroup JIDs: [${[...classGroupJids.keys()].join(", ")}].`
+      );
+    }
+    return allowed;
+  }
 
   const student = studentsByJid.get(senderJid);
   if (!student) {
