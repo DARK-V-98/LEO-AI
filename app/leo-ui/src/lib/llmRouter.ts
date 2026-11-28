@@ -326,6 +326,19 @@ function pteWritingBand(score90: number): string {
 
 export type WritingScore = Record<string, number> & { overallScore: number; feedback: string };
 
+// Shared across every writing/speaking scoring prompt — the actual score
+// breakdown sent over WhatsApp is already clean (one line per criterion,
+// see the dmText template in the bridge's index.js), but the free-form
+// 'feedback' field used to come back as one dense paragraph, which reads
+// badly on a phone. Appended once here rather than duplicated across each
+// of the ~8 task-specific prompts below.
+const FEEDBACK_FORMAT_NOTE =
+  "Format the 'feedback' field so it's easy to read on a phone screen: " +
+  "short sentences, one point per line, numbered (1. 2. 3.) or a simple " +
+  "dash for multiple separate observations or suggestions — never one " +
+  "dense unbroken paragraph. If there's more than one distinct section " +
+  "(e.g. strengths, then suggestions), leave a blank line between them.";
+
 /** Builds the system prompt for a given rubric, dynamically listing its
  * criteria and the exact JSON field names the model must use — same
  * tone/instructions as the original hardcoded Write Essay prompt. */
@@ -344,7 +357,8 @@ function writingSystemPrompt(rubric: Rubric, extraNotes?: string): string {
     "each category and giving concrete, actionable suggestions for improvement — not a vague " +
     "overall impression. If no topic was given, infer the likely topic from the essay itself " +
     "and score it on that basis rather than refusing. Respond with exactly the JSON fields " +
-    "requested, nothing else." +
+    "requested, nothing else.\n\n" +
+    FEEDBACK_FORMAT_NOTE +
     (extraNotes ? `\n\n${extraNotes}` : "")
   );
 }
@@ -672,6 +686,12 @@ type SpeakingPromptAndSchema = {
  * from the input's taskType and its task-specific fields. Returns null
  * when a required field for that task type is missing. */
 function buildSpeakingPromptAndSchema(input: SpeakingScoreInput): SpeakingPromptAndSchema | null {
+  const built = buildSpeakingPromptAndSchemaInner(input);
+  if (!built) return null;
+  return { ...built, prompt: `${built.prompt}\n\n${FEEDBACK_FORMAT_NOTE}` };
+}
+
+function buildSpeakingPromptAndSchemaInner(input: SpeakingScoreInput): SpeakingPromptAndSchema | null {
   switch (input.taskType) {
     case "read_aloud":
       if (!input.referenceText?.trim()) return null;
@@ -883,6 +903,12 @@ const TRAINER_SYSTEM_PROMPT =
   "gets sent as separate messages, the way a person sends a couple of " +
   "messages in a row rather than one block — use that naturally, but " +
   "don't force a split where one short reply is enough. " +
+  "When you're giving more than one separate point — several mistakes to " +
+  "fix, a few tips, steps to follow — lay them out as short, separate " +
+  "lines (numbered 1. 2. 3., or a simple dash each), not one dense run-on " +
+  "paragraph that crams them all together. A normal conversational reply " +
+  "with just one idea doesn't need this — only reach for it when there " +
+  "are genuinely multiple distinct points to read. " +
   "Stay strictly honest about SmartLabs-specific facts (schedules, fees, " +
   "staff, enrollment numbers) — if it wasn't actually given to you in " +
   "this conversation's context, say you're not sure and that you'll check, " +
