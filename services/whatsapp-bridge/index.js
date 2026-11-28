@@ -2578,6 +2578,17 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !posterMatch
             ? parseEssayScoreRequest(askText)
             : null;
+
+        // TEMPORARY broad diagnostic — logs the full dispatch state for
+        // every message so a misrouted command can be identified directly
+        // instead of guessing. Remove once the admin-access-message issue
+        // is confirmed/resolved.
+        console.log(
+          `[dispatch] senderJid="${senderJid}" remoteJid="${remoteJid}" isGroup=${isGroup} ` +
+            `isWhatsAppAdmin=${isWhatsAppAdmin(senderJid)} isClassGroup=${isClassGroup(remoteJid)} ` +
+            `isStudent=${studentsByJid.has(senderJid)} askText=${JSON.stringify(askText.slice(0, 80))} ` +
+            `enrollmentCommand=${JSON.stringify(enrollmentCommand)} essayScoreRequest=${JSON.stringify(essayScoreRequest)}`
+        );
         const speakingTaskRequest =
           !rememberMatch &&
           !whatRemember &&
