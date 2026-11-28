@@ -1639,6 +1639,17 @@ async function reviseDocumentOnTopic(previousMarkdown, instruction, context) {
 // to normal chat.
 const ESSAY_SCORE_PATTERN = /^\s*score\s+(?:this|my)(?:\s+essay)?\b\s*[:\-]?\s*([\s\S]*)$/i;
 
+// "predictions list" / "essay predictions" / "give me the predictions
+// list" / "send me essay predictions" etc. — sent verbatim from the
+// pteKnowledge entry below, never through the LLM, so the exact prediction
+// wording a student gets can never drift or be paraphrased. Anchored to
+// the start (allowing a handful of leading request words) rather than
+// searching the whole message — same lesson as COURSE_ROSTER_PATTERN:
+// an unanchored "predictions" match could otherwise fire from inside an
+// essay that happens to mention "predictions" mid-paragraph.
+const ESSAY_PREDICTIONS_PATTERN = /^\s*(?:\S+\s+){0,5}predictions?\b(?:\s+(?:list|topics?))?/i;
+const ESSAY_PREDICTIONS_TOPIC = "writing.essay.predictions-2026";
+
 function parseEssayScoreRequest(text) {
   const m = text.match(ESSAY_SCORE_PATTERN);
   if (!m) return null;
@@ -2585,6 +2596,16 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
           !rememberMatch && !whatRemember && !forgetMe && !enrollmentCommand && !pollMatch && !posterMatch
             ? parseEssayScoreRequest(askText)
             : null;
+        const essayPredictionsMatch =
+          !rememberMatch &&
+          !whatRemember &&
+          !forgetMe &&
+          !enrollmentCommand &&
+          !pollMatch &&
+          !posterMatch &&
+          !essayScoreRequest
+            ? ESSAY_PREDICTIONS_PATTERN.test(askText)
+            : false;
 
         // TEMPORARY broad diagnostic — logs the full dispatch state for
         // every message so a misrouted command can be identified directly
@@ -2970,6 +2991,13 @@ async function processTurn(activeSock, { remoteJid, senderJid, isGroup, askText,
             await activeSock.sendMessage(remoteJid, { text: errText }).catch(() => {});
             remember(remoteJid, "assistant", errText);
           }
+        } else if (essayPredictionsMatch) {
+          const entry = pteKnowledgeCache.find((e) => e.topic === ESSAY_PREDICTIONS_TOPIC);
+          const text = entry
+            ? entry.content
+            : "I don't have the predictions list saved yet — ask the developer to add it from the Brain page.";
+          await sendAsMessages(activeSock, remoteJid, text);
+          remember(remoteJid, "assistant", text);
         } else if (speakingTaskRequest) {
           try {
             if (!isScoringAllowed(senderJid, remoteJid, isGroup)) {
