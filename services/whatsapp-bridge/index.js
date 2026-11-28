@@ -795,7 +795,17 @@ async function isAuthorizedSender(activeSock, senderJid, remoteJid, isGroup) {
   if (isGroup) return isClassGroup(remoteJid);
 
   const student = studentsByJid.get(senderJid);
-  if (!student) return false;
+  if (!student) {
+    // TEMPORARY diagnostic — remove once the access-gate JID-format issue
+    // is confirmed/resolved. Logs exactly what WhatsApp actually sent as
+    // the sender's JID, and the known admin/student JIDs, so a mismatch
+    // (e.g. @lid vs @s.whatsapp.net) is visible instead of silent.
+    console.log(
+      `[auth] Ignored DM from unrecognized senderJid="${senderJid}" (remoteJid="${remoteJid}"). ` +
+        `Known admin JIDs: [${[...adminJids].join(", ")}]. Known student JIDs: [${[...studentsByJid.keys()].join(", ")}].`
+    );
+    return false;
+  }
   if (!student.expiresAt || student.expiresAt > Date.now()) return true;
 
   if (!student.expiryNoticeSent) {
