@@ -5,6 +5,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
   onSnapshot,
   orderBy,
   query,
@@ -46,6 +47,20 @@ export function subscribePteKnowledge(cb: (entries: PteKnowledgeEntry[]) => void
     },
     () => cb([])
   );
+}
+
+/** One-shot (non-live) read of the whole collection — used by the
+ * dashboard's own "Ask LEO" chat when Trainer mode is on, to run the same
+ * tag-retrieval the bridge does, without holding a live subscription open
+ * just for a single chat send. */
+export async function fetchPteKnowledgeOnce(): Promise<PteKnowledgeEntry[]> {
+  if (!firebaseEnabled || !db) return [];
+  try {
+    const snap = await getDocs(collection(db, COLLECTION));
+    return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PteKnowledgeEntry, "id">) }));
+  } catch {
+    return [];
+  }
 }
 
 export async function addPteKnowledgeEntry(entry: {

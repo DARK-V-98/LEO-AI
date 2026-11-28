@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Mic, Send, ShieldCheck, Check, X, Volume2, VolumeX, MessageCircle } from "lucide-react";
+import { Mic, Send, ShieldCheck, Check, X, Volume2, VolumeX, MessageCircle, GraduationCap } from "lucide-react";
 import LeoBadge from "./LeoBadge";
 import type { LeoMood } from "@/hooks/useLeoMood";
 import { useSpeech } from "@/hooks/useSpeech";
@@ -10,6 +10,8 @@ import { VoiceLang } from "@/hooks/useWakeWord";
 import { subscribeChatHistory, appendChatMessage } from "@/lib/chatHistory";
 import { logActivity } from "@/lib/companyData";
 import { firebaseEnabled } from "@/lib/firebase";
+import { fetchPteKnowledgeOnce } from "@/lib/pteKnowledge";
+import { retrievePteKnowledgeEntries, formatPteKnowledgeForPrompt } from "@/lib/pteRetrieval";
 
 type Message = {
   id: string;
@@ -32,6 +34,7 @@ export default function ChatPanel({
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [voiceOn, setVoiceOn] = useState(true);
+  const [trainerMode, setTrainerMode] = useState(false);
   const { speak, cancel, speaking } = useSpeech();
   const dictation = useDictation(voiceLang);
   const listening = dictation.active;
@@ -72,10 +75,25 @@ export default function ChatPanel({
     }
 
     try {
+      // Trainer mode mirrors exactly what a real WhatsApp student
+      // conversation does — same persona, same tag-retrieved PTE notes —
+      // so testing/QA from this dashboard chat reflects reality instead
+      // of silently falling back to the generic operator assistant.
+      let context: string | undefined;
+      if (trainerMode) {
+        const allKnowledge = await fetchPteKnowledgeOnce();
+        const matched = retrievePteKnowledgeEntries(allKnowledge, text);
+        context = formatPteKnowledgeForPrompt(matched) || undefined;
+      }
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ history: nextHistory }),
+        body: JSON.stringify({
+          history: nextHistory,
+          mode: trainerMode ? "trainer" : "operator",
+          context,
+        }),
       });
       const data = await res.json();
       const reply: string = data.reply ?? "Sorry, I didn't catch that — try again?";
@@ -145,6 +163,22 @@ export default function ChatPanel({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setTrainerMode((v) => !v)}
+            title={
+              trainerMode
+                ? "Trainer mode on — same persona + PTE notes retrieval as a real student conversation"
+                : "Trainer mode off — talking to LEO as company operator"
+            }
+            className={`flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] transition-colors ${
+              trainerMode
+                ? "border-accent-violet/40 bg-accent-violet/10 text-accent-violet"
+                : "border-panel-border text-muted hover:text-foreground"
+            }`}
+          >
+            <GraduationCap size={11} />
+            Trainer mode
+          </button>
           <button
             onClick={toggleVoice}
             className="flex items-center gap-1 rounded-full border border-panel-border px-2 py-1 text-[10px] text-muted transition-colors hover:text-foreground"
